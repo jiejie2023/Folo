@@ -35,6 +35,7 @@ export const subscriptionsTable = sqliteTable("subscriptions", {
   category: text("category"),
   createdAt: text("created_at"),
   type: text("type").notNull().$type<"feed" | "list" | "inbox">(),
+  source: text("source").notNull().default("cloud").$type<"cloud" | "local">(),
   id: text("id").primaryKey(),
 })
 

@@ -1,0 +1,1 @@
+ALTER TABLE `subscriptions` ADD `source` text DEFAULT 'cloud' NOT NULL;
