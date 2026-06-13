@@ -7,8 +7,6 @@ import { createDesktopAPIHeaders } from "@follow/utils/headers"
 import { FollowClient } from "@follow-app/client-sdk"
 import PKG from "@pkg"
 
-import { setLoginModalShow } from "~/atoms/user"
-
 import { getAuthSessionToken, getClientId, getSessionId } from "./client-session"
 
 export const followClient = new FollowClient({
@@ -47,19 +45,11 @@ followClient.addRequestInterceptor(async (ctx) => {
 })
 
 followClient.addResponseInterceptor(async ({ response }) => {
-  if (response.status === 401) {
-    const authSessionToken = IN_ELECTRON ? getAuthSessionToken() : null
-    const shouldPromptForLogin =
-      response.url.includes("/better-auth/get-session") || (!whoami() && !authSessionToken)
-
-    if (!shouldPromptForLogin) {
-      return response
-    }
-
-    // Or we can present LoginModal here.
-    // router.navigate("/login")
-    // If any response status is 401, we can set auth fail. Maybe some bug, but if navigate to login page, had same issues
-    setLoginModalShow(true)
+  if (
+    response.status === 401 && // In the custom desktop build, local RSS usage should not be interrupted by
+    // background or preview requests that happen to require an account.
+    (whoami() || (IN_ELECTRON && getAuthSessionToken()))
+  ) {
     userActions.removeCurrentUser()
   }
   try {
