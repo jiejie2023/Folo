@@ -161,4 +161,18 @@ describe("subscription source-aware reset", () => {
     expect(state.data["local-feed"]?.category).toBe("Updated Local")
     expect(subscriptionPatchMock).toHaveBeenCalledTimes(1)
   })
+
+  test("edit converts cloud subscriptions to local while signed out", async () => {
+    await subscriptionActions.upsertManyInSession([cloudSub("cloud-feed")])
+
+    await subscriptionSyncService.edit({
+      ...cloudSub("cloud-feed"),
+      category: "Updated Offline",
+    })
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["cloud-feed"]?.source).toBe("local")
+    expect(state.data["cloud-feed"]?.category).toBe("Updated Offline")
+    expect(subscriptionPatchMock).toHaveBeenCalledTimes(1)
+  })
 })

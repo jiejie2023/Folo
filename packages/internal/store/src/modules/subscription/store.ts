@@ -305,9 +305,10 @@ class SubscriptionSyncService {
     if (!current) {
       return
     }
+    const shouldEditLocally = getSubscriptionSource(current) === "local" || !whoami()
     const nextSubscription = {
       ...subscription,
-      source: getSubscriptionSource(current),
+      source: shouldEditLocally ? "local" : getSubscriptionSource(current),
     }
     const tx = createTransaction(current)
 
@@ -345,7 +346,7 @@ class SubscriptionSyncService {
       })
     })
     tx.request(async () => {
-      if (getSubscriptionSource(current) === "local") {
+      if (shouldEditLocally) {
         return
       }
 
