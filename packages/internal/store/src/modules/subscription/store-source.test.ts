@@ -1,8 +1,13 @@
 import { FeedViewType } from "@follow/constants"
 import { beforeEach, describe, expect, test, vi } from "vitest"
 
-import { subscriptionActions, useSubscriptionStore } from "./store"
+import { subscriptionActions, subscriptionSyncService, useSubscriptionStore } from "./store"
 import type { SubscriptionModel } from "./types"
+
+const { feedUpsertManyMock, subscriptionUpsertManyMock } = vi.hoisted(() => ({
+  feedUpsertManyMock: vi.fn(),
+  subscriptionUpsertManyMock: vi.fn(),
+}))
 
 const emptySetByView = () => ({
   [FeedViewType.All]: new Set<string>(),
@@ -58,12 +63,29 @@ vi.mock("@follow/database/services/subscription", () => ({
   SubscriptionService: {
     getSubscriptionAll: vi.fn(),
     reset: vi.fn(),
-    upsertMany: vi.fn(),
+    resetBySource: vi.fn(),
+    upsertMany: subscriptionUpsertManyMock,
   },
+}))
+
+vi.mock("@follow/database/services/feed", () => ({
+  FEED_EXTRA_DATA_KEYS: [],
+  FeedService: {
+    getFeedAll: vi.fn(),
+    patch: vi.fn(),
+    reset: vi.fn(),
+    upsertMany: feedUpsertManyMock,
+  },
+}))
+
+vi.mock("../entry/hooks", () => ({
+  invalidateEntriesQuery: vi.fn(),
 }))
 
 describe("subscription source-aware reset", () => {
   beforeEach(() => {
+    vi.clearAllMocks()
+
     useSubscriptionStore.setState({
       data: {},
       feedIdByView: emptySetByView(),
@@ -86,5 +108,39 @@ describe("subscription source-aware reset", () => {
     expect(state.feedIdByView[FeedViewType.Articles]?.has("local-feed")).toBe(true)
     expect(state.subscriptionIdSet.has("feed/cloud-feed")).toBe(false)
     expect(state.subscriptionIdSet.has("feed/local-feed")).toBe(true)
+  })
+
+  test("subscribeLocal inserts a local feed subscription", async () => {
+    await subscriptionSyncService.subscribeLocal({
+      feed: {
+        id: "local-feed",
+        url: "https://example.com/feed.xml",
+        title: "Example Feed",
+        description: null,
+        image: null,
+        siteUrl: "https://example.com",
+        ownerUserId: null,
+        errorAt: null,
+        errorMessage: null,
+        type: "feed",
+      },
+      subscription: {
+        url: "https://example.com/feed.xml",
+        view: FeedViewType.Articles,
+        category: "Local",
+        isPrivate: false,
+        hideFromTimeline: null,
+        title: null,
+        feedId: "local-feed",
+        listId: undefined,
+      },
+      entries: [],
+    })
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["local-feed"]?.source).toBe("local")
+    expect(state.feedIdByView[FeedViewType.Articles]?.has("local-feed")).toBe(true)
+    expect(feedUpsertManyMock).toHaveBeenCalledTimes(1)
+    expect(subscriptionUpsertManyMock).toHaveBeenCalledTimes(1)
   })
 })

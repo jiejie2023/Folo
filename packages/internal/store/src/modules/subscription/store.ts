@@ -10,6 +10,7 @@ import { apiMorph } from "../../morph/api"
 import { dbStoreMorph } from "../../morph/db-store"
 import { buildSubscriptionDbId, storeDbMorph } from "../../morph/store-db"
 import { invalidateEntriesQuery } from "../entry/hooks"
+import type { EntryModel } from "../entry/types"
 import { getFeedById } from "../feed/getter"
 import { feedActions } from "../feed/store"
 import { inboxActions } from "../inbox/store"
@@ -20,7 +21,7 @@ import { whoami } from "../user/getters"
 import { getCategoryFeedIds } from "./getter"
 import type { SubscriptionSource } from "./source"
 import { getSubscriptionSource } from "./source"
-import type { SubscriptionForm, SubscriptionModel } from "./types"
+import type { LocalSubscriptionInput, SubscriptionForm, SubscriptionModel } from "./types"
 import { getDefaultCategory, getSubscriptionDBId, getSubscriptionStoreId } from "./utils"
 
 type FeedId = string
@@ -101,6 +102,25 @@ const rebuildSubscriptionIndexes = (state: SubscriptionState) => {
     }
   }
 }
+
+const toLocalEntryModels = (
+  entries: NonNullable<LocalSubscriptionInput["entries"]>,
+  feedId: string,
+): EntryModel[] =>
+  entries.map((entry) => ({
+    ...entry,
+    content: null,
+    extra: entry.extra
+      ? {
+          ...entry.extra,
+          links: entry.extra.links ?? undefined,
+        }
+      : null,
+    feedId,
+    insertedAt: new Date(entry.publishedAt),
+    publishedAt: new Date(entry.publishedAt),
+    read: false,
+  }))
 
 const invalidateViews = (...views: (FeedViewType | undefined)[]) => {
   const viewSet = new Set<FeedViewType>()
@@ -377,6 +397,43 @@ class SubscriptionSyncService {
         userId: whoami()?.id ?? "",
       },
     ])
+
+    invalidateViews(subscription.view)
+  }
+
+  async subscribeLocal({ feed, subscription, entries }: LocalSubscriptionInput) {
+    const feedId = subscription.feedId || feed.id
+
+    if (!feedId) {
+      throw new Error("Cannot add local subscription without a feed id")
+    }
+
+    if (get().data[feedId]) {
+      throw new Error("Subscription already exists")
+    }
+
+    await feedActions.upsertMany([{ ...feed, id: feedId }])
+
+    await subscriptionActions.upsertMany([
+      {
+        ...subscription,
+        feedId,
+        listId: null,
+        inboxId: null,
+        title: subscription.title ?? null,
+        category: subscription.category ?? null,
+        hideFromTimeline: subscription.hideFromTimeline ?? null,
+        type: "feed",
+        createdAt: new Date().toISOString(),
+        userId: "local",
+        source: "local",
+      },
+    ])
+
+    if (entries?.length) {
+      const { entryActions } = await import("../entry/store")
+      await entryActions.upsertMany(toLocalEntryModels(entries, feedId))
+    }
 
     invalidateViews(subscription.view)
   }
