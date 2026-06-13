@@ -154,9 +154,10 @@ export function DiscoverForm({ type = "search" }: { type?: string }) {
   const { present, dismissAll } = useModalStack()
 
   function onSubmit(values: z.infer<typeof formSchema>) {
-    if (!ensureLogin()) {
+    if (!showModal && !ensureLogin()) {
       return
     }
+
     if (FEED_DISCOVERY_INFO[type]!.showModal) {
       present({
         title: t("feed_form.add_feed"),
