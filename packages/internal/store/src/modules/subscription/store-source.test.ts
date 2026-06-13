@@ -4,10 +4,13 @@ import { beforeEach, describe, expect, test, vi } from "vitest"
 import { subscriptionActions, subscriptionSyncService, useSubscriptionStore } from "./store"
 import type { SubscriptionModel } from "./types"
 
-const { feedUpsertManyMock, subscriptionUpsertManyMock } = vi.hoisted(() => ({
-  feedUpsertManyMock: vi.fn(),
-  subscriptionUpsertManyMock: vi.fn(),
-}))
+const { feedUpsertManyMock, subscriptionPatchMock, subscriptionUpsertManyMock } = vi.hoisted(
+  () => ({
+    feedUpsertManyMock: vi.fn(),
+    subscriptionPatchMock: vi.fn(),
+    subscriptionUpsertManyMock: vi.fn(),
+  }),
+)
 
 const emptySetByView = () => ({
   [FeedViewType.All]: new Set<string>(),
@@ -62,6 +65,7 @@ const localSub = (feedId: string): SubscriptionModel => ({
 vi.mock("@follow/database/services/subscription", () => ({
   SubscriptionService: {
     getSubscriptionAll: vi.fn(),
+    patch: subscriptionPatchMock,
     reset: vi.fn(),
     resetBySource: vi.fn(),
     upsertMany: subscriptionUpsertManyMock,
@@ -142,5 +146,19 @@ describe("subscription source-aware reset", () => {
     expect(state.feedIdByView[FeedViewType.Articles]?.has("local-feed")).toBe(true)
     expect(feedUpsertManyMock).toHaveBeenCalledTimes(1)
     expect(subscriptionUpsertManyMock).toHaveBeenCalledTimes(1)
+  })
+
+  test("edit keeps local subscriptions local", async () => {
+    await subscriptionActions.upsertManyInSession([localSub("local-feed")])
+
+    await subscriptionSyncService.edit({
+      ...localSub("local-feed"),
+      category: "Updated Local",
+    })
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["local-feed"]?.source).toBe("local")
+    expect(state.data["local-feed"]?.category).toBe("Updated Local")
+    expect(subscriptionPatchMock).toHaveBeenCalledTimes(1)
   })
 })

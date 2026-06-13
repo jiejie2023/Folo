@@ -305,35 +305,39 @@ class SubscriptionSyncService {
     if (!current) {
       return
     }
+    const nextSubscription = {
+      ...subscription,
+      source: getSubscriptionSource(current),
+    }
     const tx = createTransaction(current)
 
     let addNewCategory = false
     tx.store(() => {
       immerSet((draft) => {
         if (
-          subscription.category &&
-          !draft.categories[subscription.view]!.has(subscription.category)
+          nextSubscription.category &&
+          !draft.categories[nextSubscription.view]!.has(nextSubscription.category)
         ) {
           addNewCategory = true
-          draft.categories[subscription.view]!.add(subscription.category)
+          draft.categories[nextSubscription.view]!.add(nextSubscription.category)
         }
 
-        if (subscription.type === "feed") {
+        if (nextSubscription.type === "feed") {
           draft.feedIdByView[current.view]!.delete(current.feedId!)
-          draft.feedIdByView[subscription.view]!.add(subscription.feedId!)
+          draft.feedIdByView[nextSubscription.view]!.add(nextSubscription.feedId!)
         }
 
-        draft.data[subscriptionId] = subscription
+        draft.data[subscriptionId] = nextSubscription
       })
     })
     tx.rollback((current) => {
       immerSet((draft) => {
-        if (addNewCategory && subscription.category) {
-          draft.categories[subscription.view]!.delete(subscription.category)
+        if (addNewCategory && nextSubscription.category) {
+          draft.categories[nextSubscription.view]!.delete(nextSubscription.category)
         }
 
-        if (subscription.type === "feed") {
-          draft.feedIdByView[subscription.view]!.delete(subscription.feedId!)
+        if (nextSubscription.type === "feed") {
+          draft.feedIdByView[nextSubscription.view]!.delete(nextSubscription.feedId!)
           draft.feedIdByView[current.view]!.add(current.feedId!)
         }
 
@@ -341,20 +345,24 @@ class SubscriptionSyncService {
       })
     })
     tx.request(async () => {
+      if (getSubscriptionSource(current) === "local") {
+        return
+      }
+
       await api().subscriptions.update({
-        ...subscription,
-        feedId: subscription.feedId ?? undefined,
-        listId: subscription.listId ?? undefined,
+        ...nextSubscription,
+        feedId: nextSubscription.feedId ?? undefined,
+        listId: nextSubscription.listId ?? undefined,
       })
     })
 
     tx.persist(() => {
-      return SubscriptionService.patch(storeDbMorph.toSubscriptionSchema(subscription))
+      return SubscriptionService.patch(storeDbMorph.toSubscriptionSchema(nextSubscription))
     })
 
     await tx.run()
 
-    invalidateViews(subscription.view)
+    invalidateViews(current.view, nextSubscription.view)
   }
 
   async subscribe(subscription: SubscriptionForm) {
