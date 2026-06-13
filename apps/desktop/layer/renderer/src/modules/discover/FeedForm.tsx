@@ -274,6 +274,7 @@ const FeedInnerForm = ({
     }
   }, [analytics, defaultValues?.view, form, subscription])
 
+  // Local add is the default in the custom desktop build. Cloud sync remains a separate action.
   const followMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
       const userId = whoami()?.id || ""
@@ -292,16 +293,20 @@ const FeedInnerForm = ({
 
       if (isSubscribed) {
         return subscriptionSyncService.edit(body)
-      } else {
-        return subscriptionSyncService.subscribe(body)
       }
+
+      return subscriptionSyncService.subscribeLocal({
+        feed,
+        subscription: body,
+        entries,
+      })
     },
     onSuccess: () => {
       const feedId = feed.id
       if (feedId) {
         feedQuery.byId({ id: feedId }).invalidate()
       }
-      toast(isSubscribed ? t("feed_form.updated") : t("feed_form.followed"), {
+      toast(isSubscribed ? t("feed_form.updated") : "已添加到本地", {
         duration: 1000,
       })
 
@@ -496,13 +501,12 @@ const FeedInnerForm = ({
             </Button>
           )}
           <Button
-            disabled={!isLoggedIn}
             data-testid="feed-form-submit"
             form="feed-form"
             type="submit"
             isLoading={followMutation.isPending}
           >
-            {isSubscribed ? t("feed_form.update") : t("feed_form.follow")}
+            {isSubscribed ? t("feed_form.update") : "添加到本地"}
           </Button>
         </div>
       </RootPortal>
