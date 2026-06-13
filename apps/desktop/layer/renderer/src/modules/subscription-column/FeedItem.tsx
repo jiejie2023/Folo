@@ -61,6 +61,26 @@ const shouldShowFeedErrorIndicator = (errorAt?: string | null) => {
   return Date.now() - errorTime > FEED_ERROR_INDICATOR_DELAY_MS
 }
 
+const SubscriptionSourceBadge = ({ source }: { source?: "cloud" | "local" | null }) => {
+  if (source === "local") {
+    return (
+      <span className="ml-1 shrink-0 rounded bg-orange/10 px-1 text-[10px] leading-4 text-orange">
+        本地
+      </span>
+    )
+  }
+
+  if (source === "cloud") {
+    return (
+      <span className="ml-1 shrink-0 rounded bg-blue/10 px-1 text-[10px] leading-4 text-blue">
+        同步
+      </span>
+    )
+  }
+
+  return null
+}
+
 const DraggableItemWrapper: Component<
   {
     className?: string
@@ -245,6 +265,7 @@ const FeedItemImpl = ({ view, feedId, className, isPreview }: FeedItemProps) => 
       <div className={cn("flex min-w-0 items-center", showFeedErrorIndicator && "text-red")}>
         <FeedIcon fallback target={feed} size={16} />
         <FeedTitle feed={feed} />
+        {!isOnboardingFeed && <SubscriptionSourceBadge source={subscription?.source} />}
         {showFeedErrorIndicator && (
           <ErrorTooltip errorAt={feed.errorAt} errorMessage={feed.errorMessage}>
             <i className="i-mingcute-close-circle-fill ml-1 shrink-0 text-base" />
@@ -387,6 +408,7 @@ const ListItemImpl: Component<ListItemProps> = ({
         <EllipsisHorizontalTextWithTooltip className="truncate">
           {getPreferredTitle(list)}
         </EllipsisHorizontalTextWithTooltip>
+        <SubscriptionSourceBadge source={subscription?.source} />
 
         {subscription?.isPrivate && (
           <Tooltip delayDuration={300}>
