@@ -18,11 +18,23 @@ import { listActions } from "../list/store"
 import { unreadActions } from "../unread/store"
 import { whoami } from "../user/getters"
 import { getCategoryFeedIds } from "./getter"
+import type { SubscriptionSource } from "./source"
+import { getSubscriptionSource } from "./source"
 import type { SubscriptionForm, SubscriptionModel } from "./types"
 import { getDefaultCategory, getSubscriptionDBId, getSubscriptionStoreId } from "./utils"
 
 type FeedId = string
 type ListId = string
+
+const createEmptySetByView = <T extends string>(): Record<FeedViewType, Set<T>> => ({
+  [FeedViewType.All]: new Set(),
+  [FeedViewType.Articles]: new Set(),
+  [FeedViewType.Audios]: new Set(),
+  [FeedViewType.Notifications]: new Set(),
+  [FeedViewType.Pictures]: new Set(),
+  [FeedViewType.SocialMedia]: new Set(),
+  [FeedViewType.Videos]: new Set(),
+})
 
 export interface SubscriptionState {
   /**
@@ -47,15 +59,6 @@ export interface SubscriptionState {
   categoryOpenStateByView: Record<FeedViewType, Record<string, boolean>>
 }
 
-const emptyDataSetByView: Record<FeedViewType, Set<FeedId>> = {
-  [FeedViewType.All]: new Set(),
-  [FeedViewType.Articles]: new Set(),
-  [FeedViewType.Audios]: new Set(),
-  [FeedViewType.Notifications]: new Set(),
-  [FeedViewType.Pictures]: new Set(),
-  [FeedViewType.SocialMedia]: new Set(),
-  [FeedViewType.Videos]: new Set(),
-}
 const emptyCategoryOpenStateByView: Record<FeedViewType, Record<string, boolean>> = {
   [FeedViewType.All]: {},
   [FeedViewType.Articles]: {},
@@ -68,11 +71,35 @@ const emptyCategoryOpenStateByView: Record<FeedViewType, Record<string, boolean>
 
 const defaultState: SubscriptionState = {
   data: {},
-  feedIdByView: { ...emptyDataSetByView },
-  listIdByView: { ...emptyDataSetByView },
-  categories: { ...emptyDataSetByView },
+  feedIdByView: createEmptySetByView(),
+  listIdByView: createEmptySetByView(),
+  categories: createEmptySetByView(),
   subscriptionIdSet: new Set(),
   categoryOpenStateByView: { ...emptyCategoryOpenStateByView },
+}
+
+const rebuildSubscriptionIndexes = (state: SubscriptionState) => {
+  state.feedIdByView = createEmptySetByView()
+  state.listIdByView = createEmptySetByView()
+  state.categories = createEmptySetByView()
+  state.subscriptionIdSet = new Set()
+
+  for (const subscription of Object.values(state.data)) {
+    state.subscriptionIdSet.add(getSubscriptionDBId(subscription))
+
+    if (subscription.feedId && subscription.type === "feed") {
+      state.feedIdByView[subscription.view]!.add(subscription.feedId)
+      state.feedIdByView[FeedViewType.All]!.add(subscription.feedId)
+      if (subscription.category) {
+        state.categories[subscription.view]!.add(subscription.category)
+      }
+    }
+
+    if (subscription.listId && subscription.type === "list") {
+      state.listIdByView[subscription.view]!.add(subscription.listId)
+      state.listIdByView[FeedViewType.All]!.add(subscription.listId)
+    }
+  }
 }
 
 const invalidateViews = (...views: (FeedViewType | undefined)[]) => {
@@ -130,27 +157,56 @@ class SubscriptionActions implements Hydratable, Resetable {
   }
   async upsertMany(
     subscriptions: SubscriptionModel[],
-    options: { resetBeforeUpsert?: boolean | FeedViewType } = {},
+    options: { resetBeforeUpsert?: boolean | FeedViewType; resetSource?: SubscriptionSource } = {},
   ) {
     const tx = createTransaction()
     tx.store(() => {
       if (options.resetBeforeUpsert !== undefined) {
-        if (typeof options.resetBeforeUpsert === "boolean") {
+        const resetView =
+          typeof options.resetBeforeUpsert === "number" ? options.resetBeforeUpsert : undefined
+
+        if (options.resetSource) {
+          this.resetBySourceInSession(options.resetSource, resetView)
+        } else if (typeof options.resetBeforeUpsert === "boolean") {
           this.reset()
         } else {
           this.resetByView(options.resetBeforeUpsert)
         }
+      } else if (options.resetSource) {
+        this.resetBySourceInSession(options.resetSource)
       }
       this.upsertManyInSession(subscriptions)
     })
 
     tx.persist(() => {
-      return SubscriptionService.upsertMany(
-        subscriptions.map((s) => storeDbMorph.toSubscriptionSchema(s)),
-      )
+      return (async () => {
+        if (options.resetSource) {
+          const resetView =
+            typeof options.resetBeforeUpsert === "number" ? options.resetBeforeUpsert : undefined
+
+          await SubscriptionService.resetBySource(options.resetSource, resetView)
+        }
+
+        return SubscriptionService.upsertMany(
+          subscriptions.map((s) => storeDbMorph.toSubscriptionSchema(s)),
+        )
+      })()
     })
 
     await tx.run()
+  }
+
+  resetBySourceInSession(source: SubscriptionSource, view?: FeedViewType) {
+    immerSet((draft) => {
+      for (const [subscriptionStoreId, subscription] of Object.entries(draft.data)) {
+        if (getSubscriptionSource(subscription) !== source) continue
+        if (typeof view === "number" && subscription.view !== view) continue
+
+        delete draft.data[subscriptionStoreId]
+      }
+
+      rebuildSubscriptionIndexes(draft)
+    })
   }
 
   resetByView(view: FeedViewType) {
@@ -211,6 +267,7 @@ class SubscriptionSyncService {
     feedActions.upsertMany(collections.feeds)
     subscriptionActions.upsertMany(subscriptions, {
       resetBeforeUpsert: typeof view === "number" ? view : true,
+      resetSource: "cloud",
     })
     listActions.upsertMany(collections.lists)
 
