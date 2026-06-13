@@ -104,6 +104,7 @@ class APIMorph {
         hideFromTimeline: item.hideFromTimeline,
         title: item.title,
         createdAt: item.createdAt,
+        source: "cloud",
       } as SubscriptionModel
 
       if ("feeds" in item) {

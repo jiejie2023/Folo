@@ -29,4 +29,8 @@ describe("subscription source helpers", () => {
     expect(getSubscriptionSource({ source: local })).toBe("local")
     expect(getSubscriptionSource({ source: cloud })).toBe("cloud")
   })
+
+  test("api-shaped subscriptions can be explicitly marked as cloud", () => {
+    expect(getSubscriptionSource({ source: "cloud" })).toBe("cloud")
+  })
 })
