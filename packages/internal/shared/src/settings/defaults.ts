@@ -172,18 +172,20 @@ export const defaultAISettings: AISettings = {
   autoScrollWhenStreaming: true,
 
   localAI: {
-    mode: "folo",
-    fallbackToFoloAI: true,
-    routing: {
-      chatProfileId: null,
-      summaryProfileId: null,
-      translationProfileId: null,
-      timelineProfileId: null,
-      taskProfileId: null,
-      ttsProfileId: null,
-      mcpProfileId: null,
-      onboardingProfileId: null,
+    enabled: false,
+    defaultProfileId: null,
+    featureRouting: {
+      chat: "cloud",
+      summary: "cloud",
+      translation: "cloud",
+      timelineSummary: "cloud",
+      timelineRanking: "cloud",
+      onboardingRecommendations: "cloud",
+      tts: "cloud",
+      tasks: "cloud",
+      mcp: "cloud",
     },
+    allowFallbackToCloud: false,
   },
 
   // BYOK (Bring Your Own Key)

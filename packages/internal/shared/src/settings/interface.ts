@@ -218,29 +218,22 @@ export type LocalAIFeature =
   | "chat"
   | "summary"
   | "translation"
-  | "timeline"
-  | "task"
+  | "timelineSummary"
+  | "timelineRanking"
+  | "onboardingRecommendations"
   | "tts"
+  | "tasks"
   | "mcp"
-  | "onboarding"
 
-export type LocalAIMode = "folo" | "custom-first" | "custom-only"
+export type LocalAIMode = "cloud" | "local"
 
-export interface LocalAIFeatureRouting {
-  chatProfileId: string | null
-  summaryProfileId: string | null
-  translationProfileId: string | null
-  timelineProfileId: string | null
-  taskProfileId: string | null
-  ttsProfileId: string | null
-  mcpProfileId: string | null
-  onboardingProfileId: string | null
-}
+export type LocalAIFeatureRouting = Record<LocalAIFeature, LocalAIMode>
 
 export interface LocalAISettings {
-  mode: LocalAIMode
-  fallbackToFoloAI: boolean
-  routing: LocalAIFeatureRouting
+  enabled: boolean
+  defaultProfileId: string | null
+  featureRouting: LocalAIFeatureRouting
+  allowFallbackToCloud: boolean
 }
 
 export interface AISettings {
