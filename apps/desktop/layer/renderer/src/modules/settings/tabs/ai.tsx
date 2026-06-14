@@ -1,4 +1,5 @@
 import { Label } from "@follow/components/ui/label/index.js"
+import { IN_ELECTRON } from "@follow/shared/constants"
 import { useTranslation } from "react-i18next"
 
 import { setAISetting, useAISettingValue } from "~/atoms/settings/ai"
@@ -71,13 +72,17 @@ export const SettingAI = () => {
           },
           MCPServicesSection,
 
-          {
-            type: "title",
-            value: t("api_management.title"),
-          },
-          APIManagementSection,
-          FeatureRoutingSection,
-          LocalUsageSection,
+          ...(IN_ELECTRON
+            ? [
+                {
+                  type: "title" as const,
+                  value: t("api_management.title"),
+                },
+                APIManagementSection,
+                FeatureRoutingSection,
+                LocalUsageSection,
+              ]
+            : []),
 
           {
             type: "title",

@@ -8,6 +8,7 @@ import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
 import type { DesktopLocalAIProfile, DesktopLocalAIProfileInput } from "~/modules/local-ai/hooks"
+import { resolveLocalAIProfileApiKey } from "~/modules/local-ai/hooks"
 
 interface APIProfileModalContentProps {
   onCancel: () => void
@@ -30,6 +31,7 @@ export const APIProfileModalContent = ({
   const [name, setName] = useState(profile?.name ?? "")
   const [baseURL, setBaseURL] = useState(profile?.baseURL ?? "")
   const [apiKey, setApiKey] = useState("")
+  const [removeApiKey, setRemoveApiKey] = useState(false)
   const [modelsText, setModelsText] = useState(profile?.models.join(", ") ?? "")
   const [defaultChatModel, setDefaultChatModel] = useState(profile?.defaultChatModel ?? "")
   const [defaultSummaryModel, setDefaultSummaryModel] = useState(profile?.defaultSummaryModel ?? "")
@@ -70,7 +72,11 @@ export const APIProfileModalContent = ({
     }
 
     onSave({
-      apiKey: apiKey.trim() || null,
+      apiKey: resolveLocalAIProfileApiKey({
+        apiKey,
+        isEditing: profile !== null,
+        removeApiKey,
+      }),
       baseURL: baseURL.trim(),
       defaultChatModel: defaultChatModel.trim() || null,
       defaultSummaryModel: defaultSummaryModel.trim() || null,
@@ -122,7 +128,11 @@ export const APIProfileModalContent = ({
           id="local-ai-profile-api-key"
           type="password"
           value={apiKey}
-          onChange={(event) => setApiKey(event.target.value)}
+          disabled={removeApiKey}
+          onChange={(event) => {
+            setApiKey(event.target.value)
+            setRemoveApiKey(false)
+          }}
           placeholder={
             profile
               ? t("api_management.profile.form.api_key_edit_placeholder")
@@ -130,8 +140,17 @@ export const APIProfileModalContent = ({
           }
         />
         <p className="text-xs text-text-secondary">
-          {t("api_management.profile.form.api_key_help")}
+          {profile
+            ? t("api_management.profile.form.api_key_edit_help")
+            : t("api_management.profile.form.api_key_help")}
         </p>
+        {profile?.maskedApiKey && (
+          <CapabilitySwitch
+            checked={removeApiKey}
+            label={t("api_management.profile.form.remove_api_key")}
+            onCheckedChange={setRemoveApiKey}
+          />
+        )}
       </div>
 
       <div className="space-y-2">

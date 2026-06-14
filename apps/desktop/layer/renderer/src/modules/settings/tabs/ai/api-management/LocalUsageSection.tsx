@@ -57,7 +57,7 @@ export const LocalUsageSection = () => {
             >
               <div className="min-w-0">
                 <div className="truncate font-medium text-text">
-                  {record.feature} · {record.model}
+                  {record.feature} - {record.model}
                 </div>
                 <div className="text-text-secondary">
                   {new Date(record.createdAt).toLocaleString()}

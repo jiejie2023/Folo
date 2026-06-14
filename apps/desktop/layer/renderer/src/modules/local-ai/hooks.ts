@@ -1,4 +1,8 @@
-import type { LocalAIFeature, LocalAISettings } from "@follow/shared/settings/interface"
+import type {
+  LocalAIFeature,
+  LocalAIFeatureRouting,
+  LocalAISettings,
+} from "@follow/shared/settings/interface"
 import { useQuery } from "@tanstack/react-query"
 
 import { getAISettings, useAISettingValue } from "~/atoms/settings/ai"
@@ -32,6 +36,8 @@ export type DesktopLocalAIProfile = {
   supportsTts: boolean
   updatedAt: string
 }
+
+export type DesktopLocalAIStoredProfile = Omit<DesktopLocalAIProfile, "maskedApiKey">
 
 export type DesktopLocalAIProfileInput = {
   apiKey?: string | null
@@ -103,7 +109,7 @@ export type DesktopLocalAIIPC = {
     profileId: string
     voice?: string
   }) => Promise<DesktopLocalAISpeechResult>
-  upsertProfile: (input: DesktopLocalAIProfileInput) => Promise<DesktopLocalAIProfile>
+  upsertProfile: (input: DesktopLocalAIProfileInput) => Promise<DesktopLocalAIStoredProfile>
 }
 
 export const getLocalAIIPC = (): DesktopLocalAIIPC | null =>
@@ -126,6 +132,88 @@ export const resolveLocalAIProfileId = (
   if (!settings.enabled) return null
   if (resolveLocalAIMode(settings, feature) !== "local") return null
   return settings.defaultProfileId
+}
+
+type LocalAIModelPurpose = "chat" | "summary" | "tasks" | "timeline" | "translation" | "tts"
+
+type LocalAIModelConfiguration = Pick<
+  DesktopLocalAIProfile,
+  | "defaultChatModel"
+  | "defaultSummaryModel"
+  | "defaultTaskModel"
+  | "defaultTimelineModel"
+  | "defaultTranslationModel"
+  | "defaultTtsModel"
+  | "models"
+>
+
+export const resolveLocalAIProfileModel = (
+  profile: LocalAIModelConfiguration,
+  purpose: LocalAIModelPurpose,
+): string => {
+  const modelByPurpose = {
+    chat: profile.defaultChatModel,
+    summary: profile.defaultSummaryModel,
+    tasks: profile.defaultTaskModel,
+    timeline: profile.defaultTimelineModel,
+    translation: profile.defaultTranslationModel,
+    tts: profile.defaultTtsModel,
+  } satisfies Record<LocalAIModelPurpose, string | null>
+
+  const model = modelByPurpose[purpose] ?? profile.defaultChatModel ?? profile.models[0]
+  if (!model) {
+    throw new Error(`No local AI model is configured for ${purpose}`)
+  }
+  return model
+}
+
+const LOCAL_AI_FEATURES: LocalAIFeature[] = [
+  "chat",
+  "summary",
+  "translation",
+  "timelineSummary",
+  "timelineRanking",
+  "onboardingRecommendations",
+  "tts",
+  "tasks",
+  "mcp",
+]
+
+export const clearDeletedLocalAIDefaultProfile = (
+  settings: LocalAISettings,
+  deletedProfileId: string,
+): LocalAISettings => {
+  if (settings.defaultProfileId !== deletedProfileId) return settings
+
+  const featureRouting = LOCAL_AI_FEATURES.reduce<LocalAIFeatureRouting>(
+    (routing, feature) => {
+      routing[feature] =
+        settings.featureRouting[feature] === "local" ? "cloud" : settings.featureRouting[feature]
+      return routing
+    },
+    { ...settings.featureRouting },
+  )
+
+  return {
+    ...settings,
+    defaultProfileId: null,
+    featureRouting,
+  }
+}
+
+export const resolveLocalAIProfileApiKey = ({
+  apiKey,
+  isEditing,
+  removeApiKey,
+}: {
+  apiKey: string
+  isEditing: boolean
+  removeApiKey: boolean
+}): string | null | undefined => {
+  if (removeApiKey) return null
+  const trimmedApiKey = apiKey.trim()
+  if (trimmedApiKey) return trimmedApiKey
+  return isEditing ? undefined : null
 }
 
 export const getLocalAIProfileId = (feature: LocalAIFeature): string | null =>

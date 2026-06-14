@@ -1,7 +1,12 @@
 import type { LocalAISettings } from "@follow/shared/settings/interface"
 import { describe, expect, test } from "vitest"
 
-import { resolveLocalAIProfileId } from "./hooks"
+import {
+  clearDeletedLocalAIDefaultProfile,
+  resolveLocalAIProfileApiKey,
+  resolveLocalAIProfileId,
+  resolveLocalAIProfileModel,
+} from "./hooks"
 
 const createSettings = (overrides: Partial<LocalAISettings> = {}): LocalAISettings => ({
   allowFallbackToCloud: false,
@@ -38,5 +43,88 @@ describe("resolveLocalAIProfileId", () => {
     expect(
       resolveLocalAIProfileId(createSettings({ defaultProfileId: null }), "summary"),
     ).toBeNull()
+  })
+})
+
+describe("resolveLocalAIProfileModel", () => {
+  test("uses the purpose-specific model before chat and listed models", () => {
+    expect(
+      resolveLocalAIProfileModel(
+        {
+          defaultChatModel: "chat-model",
+          defaultSummaryModel: "summary-model",
+          defaultTaskModel: null,
+          defaultTimelineModel: null,
+          defaultTranslationModel: null,
+          defaultTtsModel: null,
+          models: ["listed-model"],
+        },
+        "summary",
+      ),
+    ).toBe("summary-model")
+  })
+
+  test("throws when no model is configured", () => {
+    expect(() =>
+      resolveLocalAIProfileModel(
+        {
+          defaultChatModel: null,
+          defaultSummaryModel: null,
+          defaultTaskModel: null,
+          defaultTimelineModel: null,
+          defaultTranslationModel: null,
+          defaultTtsModel: null,
+          models: [],
+        },
+        "translation",
+      ),
+    ).toThrow("No local AI model is configured for translation")
+  })
+})
+
+describe("clearDeletedLocalAIDefaultProfile", () => {
+  test("clears the default and changes local routes to cloud", () => {
+    const settings = createSettings({
+      featureRouting: {
+        ...createSettings().featureRouting,
+        chat: "local",
+        summary: "local",
+      },
+    })
+
+    expect(clearDeletedLocalAIDefaultProfile(settings, "profile-1")).toEqual({
+      ...settings,
+      defaultProfileId: null,
+      featureRouting: {
+        ...settings.featureRouting,
+        chat: "cloud",
+        summary: "cloud",
+      },
+    })
+  })
+
+  test("returns unchanged settings when another profile is deleted", () => {
+    const settings = createSettings()
+    expect(clearDeletedLocalAIDefaultProfile(settings, "profile-2")).toBe(settings)
+  })
+})
+
+describe("resolveLocalAIProfileApiKey", () => {
+  test("preserves an existing key when edit input is empty", () => {
+    expect(resolveLocalAIProfileApiKey({ apiKey: "", isEditing: true, removeApiKey: false })).toBe(
+      undefined,
+    )
+  })
+
+  test("removes an existing key only when explicitly requested", () => {
+    expect(resolveLocalAIProfileApiKey({ apiKey: "", isEditing: true, removeApiKey: true })).toBe(
+      null,
+    )
+  })
+
+  test("uses null for an empty key on a new profile", () => {
+    expect(resolveLocalAIProfileApiKey({ apiKey: "", isEditing: false, removeApiKey: false })).toBe(
+      null,
+    )
   })
 })

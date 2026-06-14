@@ -19,11 +19,10 @@ import type {
   DesktopLocalAICompleteTextInput,
   DesktopLocalAIProfile,
   DesktopLocalAIProfileInput,
+  DesktopLocalAIStoredProfile,
   DesktopLocalAITextResult,
 } from "./hooks"
-import { getLocalAIIPC, resolveLocalAIProfileId } from "./hooks"
-
-const DEFAULT_MODEL = "gpt-4o-mini"
+import { getLocalAIIPC, resolveLocalAIProfileId, resolveLocalAIProfileModel } from "./hooks"
 
 export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   isFeatureEnabled(feature) {
@@ -33,7 +32,12 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     return (await listDesktopProfiles()).map(toSharedProfile)
   },
   async saveProfile(input) {
-    return toSharedProfile(await upsertDesktopProfile(toDesktopProfileInput(input)))
+    const storedProfile = await upsertDesktopProfile(toDesktopProfileInput(input))
+    const profile = (await listDesktopProfiles()).find((item) => item.id === storedProfile.id)
+    if (!profile) {
+      throw new Error("Saved local AI profile could not be reloaded")
+    }
+    return toSharedProfile(profile)
   },
   async deleteProfile(profileId) {
     await requireLocalAIIPC().deleteProfile(profileId)
@@ -68,7 +72,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   },
   async createChatCompletion(input) {
     const profile = await resolveProfile(input.profileId, input.feature ?? "chat")
-    const model = input.model ?? pickModel(profile, "chat")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "chat")
     const result = await completeText({
       maxTokens: input.maxTokens,
       messages: input.messages.map((message) => ({
@@ -85,7 +89,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   },
   async summarizeEntry(input) {
     const profile = await resolveProfile(input.profileId, "summary")
-    const model = input.model ?? pickModel(profile, "summary")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "summary")
     const result = await completeText({
       maxTokens: 800,
       messages: [
@@ -114,30 +118,30 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   },
   async translateEntries(input) {
     const profile = await resolveProfile(input.profileId, "translation")
-    const model = input.model ?? pickModel(profile, "translation")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "translation")
+    const result = await completeText({
+      messages: [
+        {
+          content:
+            "Translate the requested entry fields. Respond with a strict JSON object keyed by entryId. Each value must include title, description, content, and readabilityContent with string or null values.",
+          role: "system",
+        },
+        {
+          content: JSON.stringify({
+            fields: input.fields,
+            items: input.items,
+            language: input.language,
+            mode: input.mode,
+          }),
+          role: "user",
+        },
+      ],
+      model,
+      profileId: profile.id,
+      responseFormat: "json_object",
+      temperature: 0.1,
+    })
     try {
-      const result = await completeText({
-        messages: [
-          {
-            content:
-              "Translate the requested entry fields. Respond with a strict JSON object keyed by entryId. Each value must include title, description, content, and readabilityContent with string or null values.",
-            role: "system",
-          },
-          {
-            content: JSON.stringify({
-              fields: input.fields,
-              items: input.items,
-              language: input.language,
-              mode: input.mode,
-            }),
-            role: "user",
-          },
-        ],
-        model,
-        profileId: profile.id,
-        responseFormat: "json_object",
-        temperature: 0.1,
-      })
       return parseTranslationRecord(result.text)
     } catch {
       return {}
@@ -145,7 +149,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   },
   async synthesizeSpeech(input) {
     const profile = await resolveProfile(input.profileId, "tts")
-    const model = input.model ?? pickModel(profile, "tts")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "tts")
     const result = await requireLocalAIIPC().synthesizeSpeech({
       format: input.format,
       input: input.text,
@@ -160,7 +164,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   },
   async runTask(input) {
     const profile = await resolveProfile(input.profileId, input.feature)
-    const model = input.model ?? pickModel(profile, "tasks")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "tasks")
     const result = await completeText({
       messages: [
         {
@@ -201,7 +205,7 @@ const listDesktopProfiles = async (): Promise<DesktopLocalAIProfile[]> =>
 
 const upsertDesktopProfile = async (
   input: DesktopLocalAIProfileInput,
-): Promise<DesktopLocalAIProfile> => requireLocalAIIPC().upsertProfile(input)
+): Promise<DesktopLocalAIStoredProfile> => requireLocalAIIPC().upsertProfile(input)
 
 const completeText = async (
   input: DesktopLocalAICompleteTextInput,
@@ -228,7 +232,7 @@ const toSharedProfile = (profile: DesktopLocalAIProfile): LocalAIProfile => ({
   createdAt: profile.createdAt,
   defaultModel: profile.defaultChatModel,
   enabled: profile.enabled,
-  hasApiKey: profile.maskedApiKey !== null,
+  hasApiKey: typeof profile.maskedApiKey === "string",
   headers: profile.headers,
   id: profile.id,
   name: profile.name,
@@ -255,22 +259,6 @@ const toDesktopProfileInput = (input: LocalAIProfileInput): DesktopLocalAIProfil
   supportsTools: false,
   supportsTts: false,
 })
-
-const pickModel = (
-  profile: DesktopLocalAIProfile,
-  purpose: "chat" | "summary" | "tasks" | "timeline" | "translation" | "tts",
-): string => {
-  const modelByPurpose = {
-    chat: profile.defaultChatModel,
-    summary: profile.defaultSummaryModel,
-    tasks: profile.defaultTaskModel,
-    timeline: profile.defaultTimelineModel,
-    translation: profile.defaultTranslationModel,
-    tts: profile.defaultTtsModel,
-  } satisfies Record<typeof purpose, string | null>
-
-  return modelByPurpose[purpose] ?? profile.defaultChatModel ?? profile.models[0] ?? DEFAULT_MODEL
-}
 
 const stringifyMessageContent = (
   content: LocalAIChatCompletionInput["messages"][number]["content"],

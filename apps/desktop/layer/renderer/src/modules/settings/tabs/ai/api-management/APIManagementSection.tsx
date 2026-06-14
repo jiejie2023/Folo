@@ -15,7 +15,12 @@ import { toast } from "sonner"
 import { getAISettings, setAISetting, useAISettingValue } from "~/atoms/settings/ai"
 import { useDialog, useModalStack } from "~/components/ui/modal/stacked/hooks"
 import type { DesktopLocalAIProfile, DesktopLocalAIProfileInput } from "~/modules/local-ai/hooks"
-import { getLocalAIIPC, localAIQueryKeys, useLocalAIProfiles } from "~/modules/local-ai/hooks"
+import {
+  clearDeletedLocalAIDefaultProfile,
+  getLocalAIIPC,
+  localAIQueryKeys,
+  useLocalAIProfiles,
+} from "~/modules/local-ai/hooks"
 
 import { APIProfileItem } from "./APIProfileItem"
 import { APIProfileModalContent } from "./APIProfileModalContent"
@@ -54,10 +59,7 @@ export const APIManagementSection = () => {
     onSuccess: async (_result, profileId) => {
       const latestSettings = getAISettings().localAI
       if (latestSettings.defaultProfileId === profileId) {
-        setAISetting("localAI", {
-          ...latestSettings,
-          defaultProfileId: null,
-        })
+        setAISetting("localAI", clearDeletedLocalAIDefaultProfile(latestSettings, profileId))
       }
       await queryClient.invalidateQueries({ queryKey: localAIQueryKeys.profiles })
       toast.success(t("api_management.profile.deleted"))

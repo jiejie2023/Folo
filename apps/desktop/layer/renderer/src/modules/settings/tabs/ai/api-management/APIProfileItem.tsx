@@ -81,10 +81,22 @@ export const APIProfileItem = ({ onDelete, onEdit, profile }: APIProfileItemProp
           <Button variant="ghost" size="sm" onClick={handleListModels} isLoading={isTesting}>
             {t("api_management.profile.test")}
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => onEdit(profile)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={t("api_management.profile.edit")}
+            title={t("api_management.profile.edit")}
+            onClick={() => onEdit(profile)}
+          >
             <i className="i-mgc-edit-cute-re size-4" />
           </Button>
-          <Button variant="ghost" size="sm" onClick={() => onDelete(profile)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            aria-label={t("api_management.profile.delete")}
+            title={t("api_management.profile.delete")}
+            onClick={() => onDelete(profile)}
+          >
             <i className="i-mgc-delete-2-cute-re size-4 text-red" />
           </Button>
         </div>
