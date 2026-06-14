@@ -273,6 +273,41 @@ describe("LocalAIService", () => {
     )
   })
 
+  it("records completeText setup failures for missing profiles and missing API keys", async () => {
+    const service = new LocalAIService()
+    const input = {
+      messages: [{ content: "Hi", role: "user" as const }],
+      model: "llama3",
+      profileId: "profile-1",
+    }
+
+    listLocalAIProfiles.mockReturnValueOnce([])
+    await expect(service.completeText(context, input)).rejects.toThrow("Local AI profile not found")
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "Local AI profile not found",
+      feature: "chat",
+      model: "llama3",
+      ok: false,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+
+    vi.clearAllMocks()
+    listLocalAIProfiles.mockReturnValue([profile])
+    readLocalAIProfileSecret.mockReturnValueOnce(null)
+    await expect(service.completeText(context, input)).rejects.toThrow(
+      "Local AI API key is missing",
+    )
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "Local AI API key is missing",
+      feature: "chat",
+      model: "llama3",
+      ok: false,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+  })
+
   it("returns serializable speech audio and records usage", async () => {
     synthesizeOpenAICompatibleSpeech.mockResolvedValue({
       audio: new Uint8Array([1, 2, 3]),
@@ -294,6 +329,43 @@ describe("LocalAIService", () => {
       feature: "tts",
       model: "tts-1",
       ok: true,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+  })
+
+  it("records synthesizeSpeech setup failures for missing profiles and missing API keys", async () => {
+    const service = new LocalAIService()
+    const input = {
+      input: "Read this",
+      model: "tts-1",
+      profileId: "profile-1",
+    }
+
+    listLocalAIProfiles.mockReturnValueOnce([])
+    await expect(service.synthesizeSpeech(context, input)).rejects.toThrow(
+      "Local AI profile not found",
+    )
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "Local AI profile not found",
+      feature: "tts",
+      model: "tts-1",
+      ok: false,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+
+    vi.clearAllMocks()
+    listLocalAIProfiles.mockReturnValue([profile])
+    readLocalAIProfileSecret.mockReturnValueOnce(null)
+    await expect(service.synthesizeSpeech(context, input)).rejects.toThrow(
+      "Local AI API key is missing",
+    )
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "Local AI API key is missing",
+      feature: "tts",
+      model: "tts-1",
+      ok: false,
       profileId: "profile-1",
       totalTokens: null,
     })

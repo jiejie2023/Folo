@@ -107,15 +107,18 @@ export class LocalAIService extends IpcService {
     _context: IpcContext,
     input: LocalAICompleteTextInput,
   ): Promise<LocalAITextResult> {
-    const { apiKey, profile } = resolveProfile(input.profileId)
+    let apiKey: string | null = null
 
     try {
+      const resolved = resolveProfile(input.profileId)
+      apiKey = resolved.apiKey
+
       const result = await completeOpenAICompatibleText({
-        apiKey,
+        apiKey: resolved.apiKey,
         maxTokens: input.maxTokens,
         messages: input.messages,
         model: input.model,
-        profile,
+        profile: resolved.profile,
         responseFormat: input.responseFormat,
         temperature: input.temperature,
       })
@@ -155,15 +158,18 @@ export class LocalAIService extends IpcService {
     _context: IpcContext,
     input: LocalAISpeechInput,
   ): Promise<LocalAISpeechResult> {
-    const { apiKey, profile } = resolveProfile(input.profileId)
+    let apiKey: string | null = null
 
     try {
+      const resolved = resolveProfile(input.profileId)
+      apiKey = resolved.apiKey
+
       const result = await synthesizeOpenAICompatibleSpeech({
-        apiKey,
+        apiKey: resolved.apiKey,
         format: input.format,
         input: input.input,
         model: input.model,
-        profile,
+        profile: resolved.profile,
         voice: input.voice,
       })
       recordUsage({
