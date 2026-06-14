@@ -61,6 +61,11 @@
       "require": "./src/modules/list/*.ts",
       "import": "./src/modules/list/*.ts"
     },
+    "./local-ai/*": {
+      "types": "./src/modules/local-ai/*.ts",
+      "require": "./src/modules/local-ai/*.ts",
+      "import": "./src/modules/local-ai/*.ts"
+    },
     "./morph": {
       "types": "./src/morph/*.ts",
       "require": "./src/morph/*.ts",

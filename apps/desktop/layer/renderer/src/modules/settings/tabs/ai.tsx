@@ -5,7 +5,7 @@ import { setAISetting, useAISettingValue } from "~/atoms/settings/ai"
 
 import { createDefineSettingItem } from "../helper/builder"
 import { createSettingBuilder } from "../helper/setting-builder"
-import { ByokSection } from "./ai/byok"
+import { APIManagementSection, FeatureRoutingSection, LocalUsageSection } from "./ai/api-management"
 import { MCPServicesSection } from "./ai/mcp/MCPServicesSection"
 import { PanelStyleSection } from "./ai/PanelStyleSection"
 import { PersonalizePromptSection } from "./ai/PersonalizePromptSection"
@@ -73,9 +73,11 @@ export const SettingAI = () => {
 
           {
             type: "title",
-            value: t("byok.title"),
+            value: t("api_management.title"),
           },
-          ByokSection,
+          APIManagementSection,
+          FeatureRoutingSection,
+          LocalUsageSection,
 
           {
             type: "title",
