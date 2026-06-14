@@ -1,7 +1,7 @@
 import type { Credentials } from "@eneris/push-receiver/dist/types"
 import Store from "electron-store"
 
-import type { LocalAIStoredProfile } from "./local-ai/types"
+import type { LocalAIStoredProfile, LocalAIUsageRecord } from "./local-ai/types"
 
 // @keep-sorted
 type StoreData = {
@@ -12,6 +12,7 @@ type StoreData = {
   eagleContextMenuEnabled?: boolean | null
   localAIEncryptedSecrets?: Record<string, string> | null
   localAIProfiles?: LocalAIStoredProfile[] | null
+  localAIUsageRecords?: LocalAIUsageRecord[] | null
   minimizeToTray?: boolean | null
   proxy?: string | null
   qbittorrentSID?: string | null

@@ -1,5 +1,30 @@
 export type LocalAIProviderType = "openai-compatible"
 
+export type LocalAIChatRole = "assistant" | "system" | "tool" | "user"
+
+export type LocalAIChatMessage = {
+  content: string
+  name?: string
+  role: LocalAIChatRole
+  toolCallId?: string
+}
+
+export type LocalAITextResult = {
+  text: string
+  totalTokens: number | null
+}
+
+export type LocalAIUsageRecord = {
+  createdAt: string
+  errorMessage: string | null
+  feature: string
+  id: string
+  model: string
+  ok: boolean
+  profileId: string
+  totalTokens: number | null
+}
+
 export type LocalAITestResult = {
   message: string
   ok: boolean
