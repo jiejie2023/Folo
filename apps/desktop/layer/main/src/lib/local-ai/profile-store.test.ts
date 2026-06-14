@@ -66,6 +66,13 @@ describe("local AI profile store", () => {
   beforeEach(() => {
     mocks.state.clear()
     vi.clearAllMocks()
+    mocks.safeStorage.decryptString.mockImplementation((encrypted: Buffer) =>
+      encrypted.toString("utf8").replace(/^encrypted:/, ""),
+    )
+    mocks.safeStorage.encryptString.mockImplementation((secret: string) =>
+      Buffer.from(`encrypted:${secret}`, "utf8"),
+    )
+    mocks.safeStorage.isEncryptionAvailable.mockReturnValue(true)
   })
 
   it("creates profile metadata and exposes only masked API key in list views", () => {
@@ -88,6 +95,32 @@ describe("local AI profile store", () => {
     expect(mocks.state.get("localAIEncryptedSecrets")).toEqual({
       [profile.id]: expect.stringMatching(/^safe:/),
     })
+  })
+
+  it("strips sensitive headers from stored metadata and list views", () => {
+    const profile = upsertLocalAIProfile(
+      createInput({
+        headers: {
+          Authorization: "Bearer secret",
+          Cookie: "session=secret",
+          "Proxy-Authorization": "Basic secret",
+          "Set-Cookie": "session=secret",
+          "X-Access-Token": "access-token",
+          "X-Api-Key": "api-key",
+          "X-Auth-Token": "auth-token",
+          "X-Public-Header": "public",
+          "api-key": "api-key",
+        },
+      }),
+    )
+
+    expect(profile.headers).toEqual({ "X-Public-Header": "public" })
+    expect(listLocalAIProfiles()[0]?.headers).toEqual({ "X-Public-Header": "public" })
+    expect(mocks.state.get("localAIProfiles")).toEqual([
+      expect.objectContaining({
+        headers: { "X-Public-Header": "public" },
+      }),
+    ])
   })
 
   it("preserves the existing secret when updating metadata with apiKey undefined", () => {
@@ -136,6 +169,40 @@ describe("local AI profile store", () => {
     })
     expect(readLocalAIProfileSecret(created.id)).toBe("short")
     expect(listLocalAIProfiles()[0]?.maskedApiKey).toBe("....")
+  })
+
+  it("does not write metadata or secrets for a new profile when secret encryption fails", () => {
+    mocks.safeStorage.encryptString.mockImplementationOnce(() => {
+      throw new Error("encrypt failed")
+    })
+
+    expect(() => upsertLocalAIProfile(createInput())).toThrow("encrypt failed")
+    expect(mocks.state.get("localAIProfiles")).toBeUndefined()
+    expect(mocks.state.get("localAIEncryptedSecrets")).toBeUndefined()
+  })
+
+  it("keeps existing metadata and secrets unchanged when update secret encryption fails", () => {
+    const created = upsertLocalAIProfile(createInput())
+    const profilesBefore = mocks.state.get("localAIProfiles")
+    const secretsBefore = mocks.state.get("localAIEncryptedSecrets")
+
+    mocks.safeStorage.encryptString.mockImplementationOnce(() => {
+      throw new Error("encrypt failed")
+    })
+
+    expect(() =>
+      upsertLocalAIProfile(
+        createInput({
+          apiKey: "sk-new-secret123456",
+          id: created.id,
+          name: "Should Not Persist",
+        }),
+      ),
+    ).toThrow("encrypt failed")
+
+    expect(mocks.state.get("localAIProfiles")).toEqual(profilesBefore)
+    expect(mocks.state.get("localAIEncryptedSecrets")).toEqual(secretsBefore)
+    expect(readLocalAIProfileSecret(created.id)).toBe("sk-secret123456")
   })
 
   it("returns null instead of throwing when secret decoding fails", () => {
