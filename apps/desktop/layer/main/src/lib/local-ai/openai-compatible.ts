@@ -191,6 +191,10 @@ export const streamOpenAICompatibleChat = async ({
     }
   }
 
+  if (isPendingSSEEvent(buffer)) {
+    throw new Error("OpenAI-compatible streaming response was malformed: truncated event")
+  }
+
   return { text, totalTokens }
 }
 
@@ -240,10 +244,38 @@ const buildHeaders = (
   apiKey: string,
   includeJsonContentType = false,
 ): Record<string, string> => ({
-  ...profile.headers,
+  ...sanitizeProfileHeaders(profile.headers),
   ...(includeJsonContentType ? { "Content-Type": "application/json" } : {}),
   Authorization: `Bearer ${apiKey}`,
 })
+
+const SENSITIVE_HEADER_PARTS = [
+  "auth",
+  "token",
+  "secret",
+  "key",
+  "cookie",
+  "password",
+  "credential",
+  "session",
+]
+
+const sanitizeProfileHeaders = (headers: Record<string, string>): Record<string, string> =>
+  Object.fromEntries(Object.entries(headers).filter(([name]) => !isSensitiveProfileHeader(name)))
+
+const isSensitiveProfileHeader = (name: string): boolean => {
+  const normalized = name.trim().toLowerCase()
+  if (normalized === "authorization" || normalized === "proxy-authorization") {
+    return true
+  }
+
+  const parts = normalized.split(/[^a-z0-9]+/).filter(Boolean)
+  return parts.some((part) =>
+    SENSITIVE_HEADER_PARTS.some(
+      (sensitivePart) => part === sensitivePart || part.includes(sensitivePart),
+    ),
+  )
+}
 
 const serializeMessages = (messages: LocalAIChatMessage[]): OpenAICompatibleChatRequestMessage[] =>
   messages.map((message) =>
@@ -392,6 +424,18 @@ const readSSEData = (event: string): string | null => {
     .map((line) => line.slice("data:".length).trimStart())
 
   return dataLines.length > 0 ? dataLines.join("\n").trimEnd() : null
+}
+
+const isPendingSSEEvent = (buffer: string): boolean => {
+  const trimmed = buffer.trim()
+  if (!trimmed) {
+    return false
+  }
+
+  return trimmed
+    .replaceAll("\r\n", "\n")
+    .split("\n")
+    .some((line) => /^(?:data|event|id|retry):/.test(line))
 }
 
 const compactObject = <T extends Record<string, unknown>>(input: T): T => {

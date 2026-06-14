@@ -16,19 +16,22 @@ export const recordLocalAIUsage = (
     id: randomUUID(),
   }
 
-  store.set(USAGE_RECORDS_KEY, [record, ...readUsageRecords()].slice(0, MAX_USAGE_RECORDS))
+  store.set(
+    USAGE_RECORDS_KEY,
+    [cloneUsageRecord(record), ...readUsageRecords()].slice(0, MAX_USAGE_RECORDS),
+  )
 
-  return record
+  return cloneUsageRecord(record)
 }
 
 export const listLocalAIUsage = (limit?: number): LocalAIUsageRecord[] => {
   const records = readUsageRecords()
 
   if (typeof limit !== "number") {
-    return records
+    return records.map(cloneUsageRecord)
   }
 
-  return records.slice(0, Math.max(0, limit))
+  return records.slice(0, Math.max(0, limit)).map(cloneUsageRecord)
 }
 
 export const clearLocalAIUsage = (): void => {
@@ -39,3 +42,5 @@ const readUsageRecords = (): LocalAIUsageRecord[] =>
   [...(store.get(USAGE_RECORDS_KEY) ?? [])].sort((left, right) =>
     right.createdAt.localeCompare(left.createdAt),
   )
+
+const cloneUsageRecord = (record: LocalAIUsageRecord): LocalAIUsageRecord => ({ ...record })

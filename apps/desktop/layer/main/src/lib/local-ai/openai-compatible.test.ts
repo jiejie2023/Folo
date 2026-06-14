@@ -98,6 +98,26 @@ describe("OpenAI-compatible local AI client", () => {
     ])
   })
 
+  it("filters custom auth-like headers before adding managed authorization", async () => {
+    const { calls, fetchFn } = createFetch(Response.json({ data: [] }))
+
+    await listOpenAICompatibleModels({
+      apiKey: "sk-secret",
+      fetchFn,
+      profile: createProfile({
+        headers: {
+          authorization: "Token custom",
+          "X-Public": "yes",
+        },
+      }),
+    })
+
+    expect(calls[0]?.init?.headers).toEqual({
+      Authorization: "Bearer sk-secret",
+      "X-Public": "yes",
+    })
+  })
+
   it("completes non-streaming chat text and returns total token usage", async () => {
     const { calls, fetchFn } = createFetch(
       Response.json({
@@ -166,6 +186,24 @@ describe("OpenAI-compatible local AI client", () => {
       model: "gpt-4o-mini",
       stream: true,
     })
+  })
+
+  it("rejects truncated SSE data at EOF", async () => {
+    const response = new Response(createSSEStream(['data: {"choices"']), {
+      headers: { "Content-Type": "text/event-stream" },
+    })
+    const { fetchFn } = createFetch(response)
+
+    await expect(
+      streamOpenAICompatibleChat({
+        apiKey: "sk-secret",
+        fetchFn,
+        messages,
+        model: "gpt-4o-mini",
+        onDelta: vi.fn(),
+        profile: createProfile(),
+      }),
+    ).rejects.toThrow("OpenAI-compatible streaming response was malformed")
   })
 
   it("throws readable non-OK errors without leaking the API key", async () => {

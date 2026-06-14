@@ -50,6 +50,29 @@ describe("local AI usage store", () => {
     expect(first.createdAt).toEqual(expect.any(String))
   })
 
+  it("returns cloned records so caller mutations do not change history", () => {
+    const recorded = recordLocalAIUsage({
+      errorMessage: null,
+      feature: "summary",
+      model: "gpt-4o-mini",
+      ok: true,
+      profileId: "profile-1",
+      totalTokens: 10,
+    })
+
+    recorded.feature = "mutated-return"
+    const listed = listLocalAIUsage()
+    listed[0]!.feature = "mutated-list"
+
+    expect(listLocalAIUsage()[0]).toEqual(
+      expect.objectContaining({
+        feature: "summary",
+        model: "gpt-4o-mini",
+        totalTokens: 10,
+      }),
+    )
+  })
+
   it("clears recorded usage", () => {
     recordLocalAIUsage({
       errorMessage: null,
