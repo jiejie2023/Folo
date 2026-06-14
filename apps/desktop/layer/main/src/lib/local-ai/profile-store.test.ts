@@ -23,6 +23,10 @@ const mocks = vi.hoisted(() => {
       encryptString: vi.fn((secret: string) => Buffer.from(`encrypted:${secret}`, "utf8")),
       isEncryptionAvailable: vi.fn(() => true),
     },
+    storeGet: vi.fn((key: string) => state.get(key)),
+    storeSet: vi.fn((key: string, value: unknown) => {
+      state.set(key, value)
+    }),
   }
 })
 
@@ -32,10 +36,8 @@ vi.mock("electron", () => ({
 
 vi.mock("~/lib/store", () => ({
   store: {
-    get: vi.fn((key: string) => mocks.state.get(key)),
-    set: vi.fn((key: string, value: unknown) => {
-      mocks.state.set(key, value)
-    }),
+    get: mocks.storeGet,
+    set: mocks.storeSet,
   },
 }))
 
@@ -105,9 +107,14 @@ describe("local AI profile store", () => {
           Cookie: "session=secret",
           "Proxy-Authorization": "Basic secret",
           "Set-Cookie": "session=secret",
+          "CF-Access-Client-Secret": "cloudflare-secret",
+          "Helicone-Auth": "helicone-secret",
+          "X-Credential": "credential",
           "X-Access-Token": "access-token",
           "X-Api-Key": "api-key",
           "X-Auth-Token": "auth-token",
+          "X-Provider-Token": "provider-token",
+          "X-Session": "session",
           "X-Public-Header": "public",
           "api-key": "api-key",
         },
@@ -203,6 +210,19 @@ describe("local AI profile store", () => {
     expect(mocks.state.get("localAIProfiles")).toEqual(profilesBefore)
     expect(mocks.state.get("localAIEncryptedSecrets")).toEqual(secretsBefore)
     expect(readLocalAIProfileSecret(created.id)).toBe("sk-secret123456")
+  })
+
+  it("does not write profile metadata when the secret store write fails", () => {
+    mocks.storeSet.mockImplementationOnce((key: string, value: unknown) => {
+      if (key === "localAIEncryptedSecrets") {
+        throw new Error("secret write failed")
+      }
+      mocks.state.set(key, value)
+    })
+
+    expect(() => upsertLocalAIProfile(createInput())).toThrow("secret write failed")
+    expect(mocks.state.get("localAIProfiles")).toBeUndefined()
+    expect(mocks.state.get("localAIEncryptedSecrets")).toBeUndefined()
   })
 
   it("returns null instead of throwing when secret decoding fails", () => {

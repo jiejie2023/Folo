@@ -25,6 +25,18 @@ const SENSITIVE_HEADER_NAMES = new Set([
   "x-api-key",
   "x-auth-token",
 ])
+const SENSITIVE_HEADER_PARTS = new Set([
+  "auth",
+  "authorization",
+  "cookie",
+  "credential",
+  "credentials",
+  "key",
+  "password",
+  "secret",
+  "session",
+  "token",
+])
 
 export const maskSecret = (secret: string | null | undefined): string | null => {
   if (!secret) {
@@ -107,15 +119,16 @@ export const upsertLocalAIProfile = (input: LocalAIProfileUpsertInput): LocalAIS
     updatedAt: now,
   }
 
-  writeProfiles(upsertProfile(profiles, profile))
-  writeSecrets(nextSecrets)
+  commitProfileAndSecrets(upsertProfile(profiles, profile), nextSecrets)
 
   return profile
 }
 
 export const deleteLocalAIProfile = (profileId: string): void => {
-  writeProfiles(readProfiles().filter((profile) => profile.id !== profileId))
-  removeSecret(profileId)
+  commitProfileAndSecrets(
+    readProfiles().filter((profile) => profile.id !== profileId),
+    omitSecret(readSecrets(), profileId),
+  )
 }
 
 export const updateLocalAIProfileTestResult = (
@@ -143,10 +156,24 @@ const normalizeBaseURL = (baseURL: string): string => baseURL.trim().replace(/\/
 
 const sanitizeHeaders = (headers: Record<string, string>): Record<string, string> =>
   Object.fromEntries(
-    Object.entries(headers).filter(
-      ([headerName]) => !SENSITIVE_HEADER_NAMES.has(headerName.toLowerCase()),
-    ),
+    Object.entries(headers).filter(([headerName]) => !isSensitiveHeaderName(headerName)),
   )
+
+const isSensitiveHeaderName = (headerName: string): boolean => {
+  const normalized = headerName.toLowerCase()
+  if (SENSITIVE_HEADER_NAMES.has(normalized)) {
+    return true
+  }
+
+  if (normalized.includes("apikey") || normalized.includes("api-key")) {
+    return true
+  }
+
+  return normalized
+    .split(/[^a-z0-9]+/)
+    .filter(Boolean)
+    .some((part) => SENSITIVE_HEADER_PARTS.has(part))
+}
 
 const sanitizeProfile = (profile: LocalAIStoredProfile): LocalAIStoredProfile => ({
   ...profile,
@@ -164,6 +191,21 @@ const readSecrets = (): Record<string, string> => store.get(SECRETS_KEY) ?? {}
 
 const writeSecrets = (secrets: Record<string, string>): void => {
   store.set(SECRETS_KEY, secrets)
+}
+
+const commitProfileAndSecrets = (
+  profiles: LocalAIStoredProfile[],
+  secrets: Record<string, string>,
+): void => {
+  const previousSecrets = readSecrets()
+
+  writeSecrets(secrets)
+  try {
+    writeProfiles(profiles)
+  } catch (error) {
+    writeSecrets(previousSecrets)
+    throw error
+  }
 }
 
 const upsertProfile = (
@@ -201,10 +243,6 @@ const getNextSecrets = (
     ...secrets,
     [profileId]: encodeSecret(normalizedSecret),
   }
-}
-
-const removeSecret = (profileId: string): void => {
-  writeSecrets(omitSecret(readSecrets(), profileId))
 }
 
 const omitSecret = (secrets: Record<string, string>, profileId: string): Record<string, string> => {
