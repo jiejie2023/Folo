@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 
+import type { LocalAIFeature } from "@follow/shared/settings/interface"
 import type { IpcContext } from "electron-ipc-decorator"
 import { IpcMethod, IpcService } from "electron-ipc-decorator"
 
@@ -27,6 +28,7 @@ import type {
 import { clearLocalAIUsage, listLocalAIUsage, recordLocalAIUsage } from "~/lib/local-ai/usage-store"
 
 type LocalAICompleteTextInput = {
+  feature?: LocalAIFeature
   maxTokens?: number
   messages: LocalAIChatMessage[]
   model: string
@@ -108,10 +110,14 @@ export class LocalAIService extends IpcService {
     input: LocalAICompleteTextInput,
   ): Promise<LocalAITextResult> {
     let apiKey: string | null = null
+    const feature = input.feature ?? "chat"
 
     try {
       const resolved = resolveProfile(input.profileId)
       apiKey = resolved.apiKey
+      if (input.responseFormat === "json_object" && !resolved.profile.supportsJsonMode) {
+        throw new Error("Local AI profile does not support JSON mode")
+      }
 
       const result = await completeOpenAICompatibleText({
         apiKey: resolved.apiKey,
@@ -123,7 +129,7 @@ export class LocalAIService extends IpcService {
         temperature: input.temperature,
       })
       recordUsage({
-        feature: "chat",
+        feature,
         model: input.model,
         ok: true,
         profileId: input.profileId,
@@ -134,7 +140,7 @@ export class LocalAIService extends IpcService {
       const message = sanitizeErrorMessage(error, apiKey)
       recordUsage({
         errorMessage: message,
-        feature: "chat",
+        feature,
         model: input.model,
         ok: false,
         profileId: input.profileId,
@@ -163,6 +169,9 @@ export class LocalAIService extends IpcService {
     try {
       const resolved = resolveProfile(input.profileId)
       apiKey = resolved.apiKey
+      if (!resolved.profile.supportsTts) {
+        throw new Error("Local AI profile does not support TTS")
+      }
 
       const result = await synthesizeOpenAICompatibleSpeech({
         apiKey: resolved.apiKey,

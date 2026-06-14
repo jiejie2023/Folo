@@ -82,6 +82,7 @@ export type DesktopLocalAISpeechResult = {
 }
 
 export type DesktopLocalAICompleteTextInput = {
+  feature: LocalAIFeature
   maxTokens?: number
   messages: Array<{
     content: string

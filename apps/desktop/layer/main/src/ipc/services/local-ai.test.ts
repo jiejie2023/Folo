@@ -171,6 +171,31 @@ describe("LocalAIService", () => {
     })
   })
 
+  it.each(["summary", "translation", "tasks"] as const)(
+    "records successful %s completeText usage with the requested feature",
+    async (feature) => {
+      const result: LocalAITextResult = { text: "Result", totalTokens: 8 }
+      completeOpenAICompatibleText.mockResolvedValue(result)
+      const service = new LocalAIService()
+
+      await service.completeText(context, {
+        feature,
+        messages: [{ content: "Prompt", role: "user" }],
+        model: "llama3",
+        profileId: "profile-1",
+      })
+
+      expect(recordLocalAIUsage).toHaveBeenCalledWith({
+        errorMessage: null,
+        feature,
+        model: "llama3",
+        ok: true,
+        profileId: "profile-1",
+        totalTokens: 8,
+      })
+    },
+  )
+
   it("records completeText failure without exposing the raw API key", async () => {
     completeOpenAICompatibleText.mockRejectedValue(new Error("bad sk-secret-raw token"))
     const service = new LocalAIService()
@@ -186,6 +211,31 @@ describe("LocalAIService", () => {
     expect(recordLocalAIUsage).toHaveBeenCalledWith({
       errorMessage: "bad [redacted] token",
       feature: "chat",
+      model: "llama3",
+      ok: false,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+  })
+
+  it("rejects unsupported JSON mode and records translation failure", async () => {
+    listLocalAIProfiles.mockReturnValue([{ ...profile, supportsJsonMode: false }])
+    const service = new LocalAIService()
+
+    await expect(
+      service.completeText(context, {
+        feature: "translation",
+        messages: [{ content: "Translate", role: "user" }],
+        model: "llama3",
+        profileId: "profile-1",
+        responseFormat: "json_object",
+      }),
+    ).rejects.toThrow("Local AI profile does not support JSON mode")
+
+    expect(completeOpenAICompatibleText).not.toHaveBeenCalled()
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "Local AI profile does not support JSON mode",
+      feature: "translation",
       model: "llama3",
       ok: false,
       profileId: "profile-1",
@@ -329,6 +379,29 @@ describe("LocalAIService", () => {
       feature: "tts",
       model: "tts-1",
       ok: true,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+  })
+
+  it("rejects unsupported TTS and records failed usage", async () => {
+    listLocalAIProfiles.mockReturnValue([{ ...profile, supportsTts: false }])
+    const service = new LocalAIService()
+
+    await expect(
+      service.synthesizeSpeech(context, {
+        input: "Read this",
+        model: "tts-1",
+        profileId: "profile-1",
+      }),
+    ).rejects.toThrow("Local AI profile does not support TTS")
+
+    expect(synthesizeOpenAICompatibleSpeech).not.toHaveBeenCalled()
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "Local AI profile does not support TTS",
+      feature: "tts",
+      model: "tts-1",
+      ok: false,
       profileId: "profile-1",
       totalTokens: null,
     })

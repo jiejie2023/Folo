@@ -77,9 +77,11 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     return models.map((model) => ({ id: model, name: model }))
   },
   async createChatCompletion(input) {
-    const profile = await resolveProfile(input.profileId, input.feature ?? "chat")
+    const feature = input.feature ?? "chat"
+    const profile = await resolveProfile(input.profileId, feature)
     const model = input.model ?? resolveLocalAIProfileModel(profile, "chat")
     const result = await completeText({
+      feature,
       maxTokens: input.maxTokens,
       messages: input.messages.map((message) => ({
         content: stringifyMessageContent(message.content),
@@ -97,6 +99,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     const profile = await resolveProfile(input.profileId, "summary")
     const model = input.model ?? resolveLocalAIProfileModel(profile, "summary")
     const result = await completeText({
+      feature: "summary",
       maxTokens: 800,
       messages: [
         {
@@ -126,6 +129,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     const profile = await resolveProfile(input.profileId, "translation")
     const model = input.model ?? resolveLocalAIProfileModel(profile, "translation")
     const result = await completeText({
+      feature: "translation",
       messages: [
         {
           content:
@@ -174,6 +178,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
       input.model ??
       resolveLocalAIProfileModel(profile, resolveLocalAITaskModelPurpose(input.feature))
     const result = await completeText({
+      feature: input.feature,
       messages: [
         {
           content:
