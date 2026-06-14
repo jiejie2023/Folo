@@ -1,0 +1,194 @@
+import { randomUUID } from "node:crypto"
+
+import { safeStorage } from "electron"
+
+import { store } from "~/lib/store"
+
+import type {
+  LocalAIProfileUpsertInput,
+  LocalAIProfileView,
+  LocalAIStoredProfile,
+  LocalAITestResult,
+} from "./types"
+
+const PROFILES_KEY = "localAIProfiles"
+const SECRETS_KEY = "localAIEncryptedSecrets"
+const SAFE_PREFIX = "safe:"
+const TEXT_PREFIX = "text:"
+
+export const maskSecret = (secret: string | null | undefined): string | null => {
+  if (!secret) {
+    return null
+  }
+
+  if (secret.length <= 8) {
+    return "...."
+  }
+
+  return `${secret.slice(0, 3)}...${secret.slice(-4)}`
+}
+
+export const listLocalAIProfiles = (): LocalAIProfileView[] =>
+  readProfiles().map((profile) => ({
+    ...profile,
+    maskedApiKey: maskSecret(readLocalAIProfileSecret(profile.id)),
+  }))
+
+export const readLocalAIProfileSecret = (profileId: string): string | null => {
+  const encoded = readSecrets()[profileId]
+  if (!encoded) {
+    return null
+  }
+
+  try {
+    if (encoded.startsWith(SAFE_PREFIX)) {
+      const payload = encoded.slice(SAFE_PREFIX.length)
+      if (!isBase64Payload(payload)) {
+        return null
+      }
+
+      const encrypted = Buffer.from(payload, "base64")
+      return safeStorage.decryptString(encrypted)
+    }
+
+    if (encoded.startsWith(TEXT_PREFIX)) {
+      const payload = encoded.slice(TEXT_PREFIX.length)
+      if (!isBase64Payload(payload)) {
+        return null
+      }
+
+      return Buffer.from(payload, "base64").toString("utf8")
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+export const upsertLocalAIProfile = (input: LocalAIProfileUpsertInput): LocalAIStoredProfile => {
+  const profiles = readProfiles()
+  const existing = input.id ? profiles.find((profile) => profile.id === input.id) : undefined
+  const now = new Date().toISOString()
+  const id = existing?.id ?? input.id ?? randomUUID()
+
+  const profile: LocalAIStoredProfile = {
+    baseURL: normalizeBaseURL(input.baseURL),
+    createdAt: existing?.createdAt ?? now,
+    defaultChatModel: input.defaultChatModel,
+    defaultSummaryModel: input.defaultSummaryModel,
+    defaultTaskModel: input.defaultTaskModel,
+    defaultTimelineModel: input.defaultTimelineModel,
+    defaultTranslationModel: input.defaultTranslationModel,
+    defaultTtsModel: input.defaultTtsModel,
+    enabled: input.enabled,
+    headers: input.headers,
+    id,
+    lastTestedAt: existing?.lastTestedAt ?? null,
+    lastTestResult: existing?.lastTestResult ?? null,
+    models: input.models,
+    name: input.name,
+    providerType: input.providerType,
+    supportsJsonMode: input.supportsJsonMode,
+    supportsStreaming: input.supportsStreaming,
+    supportsTools: input.supportsTools,
+    supportsTts: input.supportsTts,
+    updatedAt: now,
+  }
+
+  writeProfiles(upsertProfile(profiles, profile))
+  updateSecret(id, input.apiKey)
+
+  return profile
+}
+
+export const deleteLocalAIProfile = (profileId: string): void => {
+  writeProfiles(readProfiles().filter((profile) => profile.id !== profileId))
+  removeSecret(profileId)
+}
+
+export const updateLocalAIProfileTestResult = (
+  profileId: string,
+  result: LocalAITestResult,
+): LocalAIStoredProfile | null => {
+  const profiles = readProfiles()
+  const existing = profiles.find((profile) => profile.id === profileId)
+  if (!existing) {
+    return null
+  }
+
+  const updated: LocalAIStoredProfile = {
+    ...existing,
+    lastTestedAt: result.testedAt,
+    lastTestResult: result,
+    updatedAt: new Date().toISOString(),
+  }
+
+  writeProfiles(upsertProfile(profiles, updated))
+  return updated
+}
+
+const normalizeBaseURL = (baseURL: string): string => baseURL.trim().replace(/\/+$/, "")
+
+const readProfiles = (): LocalAIStoredProfile[] => store.get(PROFILES_KEY) ?? []
+
+const writeProfiles = (profiles: LocalAIStoredProfile[]): void => {
+  store.set(PROFILES_KEY, profiles)
+}
+
+const readSecrets = (): Record<string, string> => store.get(SECRETS_KEY) ?? {}
+
+const writeSecrets = (secrets: Record<string, string>): void => {
+  store.set(SECRETS_KEY, secrets)
+}
+
+const upsertProfile = (
+  profiles: LocalAIStoredProfile[],
+  profile: LocalAIStoredProfile,
+): LocalAIStoredProfile[] => {
+  const existingIndex = profiles.findIndex((item) => item.id === profile.id)
+  if (existingIndex === -1) {
+    return [...profiles, profile]
+  }
+
+  return profiles.map((item) => (item.id === profile.id ? profile : item))
+}
+
+const updateSecret = (profileId: string, apiKey: string | null | undefined): void => {
+  if (apiKey === undefined) {
+    return
+  }
+
+  if (apiKey === null) {
+    removeSecret(profileId)
+    return
+  }
+
+  const normalizedSecret = apiKey.trim()
+  if (!normalizedSecret) {
+    removeSecret(profileId)
+    return
+  }
+
+  writeSecrets({
+    ...readSecrets(),
+    [profileId]: encodeSecret(normalizedSecret),
+  })
+}
+
+const removeSecret = (profileId: string): void => {
+  const { [profileId]: _removed, ...remainingSecrets } = readSecrets()
+  writeSecrets(remainingSecrets)
+}
+
+const encodeSecret = (secret: string): string => {
+  if (safeStorage.isEncryptionAvailable()) {
+    const encrypted = safeStorage.encryptString(secret)
+    return `${SAFE_PREFIX}${encrypted.toString("base64")}`
+  }
+
+  return `${TEXT_PREFIX}${Buffer.from(secret, "utf8").toString("base64")}`
+}
+
+const isBase64Payload = (payload: string): boolean =>
+  payload.length > 0 && payload.length % 4 === 0 && /^[\d+/=A-Z]+$/i.test(payload)
