@@ -1,6 +1,7 @@
 import type { AuthClient } from "@follow/shared/auth"
 import type { QueryClient } from "@tanstack/react-query"
 
+import type { LocalAIBridge } from "./modules/local-ai/types"
 import type { FollowAPI } from "./types"
 
 const NO_VALUE_DEFAULT = Symbol("NO_VALUE_DEFAULT")
@@ -26,10 +27,27 @@ function createJSContext<T>() {
   }
 }
 
+function createOptionalJSContext<T>() {
+  let contextValue: T | undefined
+
+  const provide = (value?: T) => {
+    contextValue = value
+  }
+
+  const consumer = (): T | undefined => contextValue
+
+  return {
+    provide,
+    consumer,
+  }
+}
+
 export const apiContext = createJSContext<FollowAPI>()
 export const authClientContext = createJSContext<AuthClient>()
 export const queryClientContext = createJSContext<QueryClient>()
+export const localAIContext = createOptionalJSContext<LocalAIBridge>()
 
 export const api = apiContext.consumer
 export const authClient = authClientContext.consumer
 export const queryClient = queryClientContext.consumer
+export const localAI = localAIContext.consumer

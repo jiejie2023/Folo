@@ -214,6 +214,35 @@ export interface MCPService {
   lastUsed: string | null
 }
 
+export type LocalAIFeature =
+  | "chat"
+  | "summary"
+  | "translation"
+  | "timeline"
+  | "task"
+  | "tts"
+  | "mcp"
+  | "onboarding"
+
+export type LocalAIMode = "folo" | "custom-first" | "custom-only"
+
+export interface LocalAIFeatureRouting {
+  chatProfileId: string | null
+  summaryProfileId: string | null
+  translationProfileId: string | null
+  timelineProfileId: string | null
+  taskProfileId: string | null
+  ttsProfileId: string | null
+  mcpProfileId: string | null
+  onboardingProfileId: string | null
+}
+
+export interface LocalAISettings {
+  mode: LocalAIMode
+  fallbackToFoloAI: boolean
+  routing: LocalAIFeatureRouting
+}
+
 export interface AISettings {
   personalizePrompt: string
   aiTimelinePrompt: string
@@ -225,6 +254,8 @@ export interface AISettings {
 
   // Features
   autoScrollWhenStreaming: boolean
+
+  localAI: LocalAISettings
 
   byok: UserByokSettings
 }

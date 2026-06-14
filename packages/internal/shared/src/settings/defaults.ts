@@ -171,6 +171,21 @@ export const defaultAISettings: AISettings = {
   // Features
   autoScrollWhenStreaming: true,
 
+  localAI: {
+    mode: "folo",
+    fallbackToFoloAI: true,
+    routing: {
+      chatProfileId: null,
+      summaryProfileId: null,
+      translationProfileId: null,
+      timelineProfileId: null,
+      taskProfileId: null,
+      ttsProfileId: null,
+      mcpProfileId: null,
+      onboardingProfileId: null,
+    },
+  },
+
   // BYOK (Bring Your Own Key)
   byok: {
     enabled: false,
