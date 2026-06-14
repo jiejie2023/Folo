@@ -22,7 +22,13 @@ import type {
   DesktopLocalAIStoredProfile,
   DesktopLocalAITextResult,
 } from "./hooks"
-import { getLocalAIIPC, resolveLocalAIProfileId, resolveLocalAIProfileModel } from "./hooks"
+import {
+  assertLocalAIProfileEnabled,
+  getLocalAIIPC,
+  resolveLocalAIProfileId,
+  resolveLocalAIProfileModel,
+  resolveLocalAITaskModelPurpose,
+} from "./hooks"
 
 export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   isFeatureEnabled(feature) {
@@ -164,7 +170,9 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
   },
   async runTask(input) {
     const profile = await resolveProfile(input.profileId, input.feature)
-    const model = input.model ?? resolveLocalAIProfileModel(profile, "tasks")
+    const model =
+      input.model ??
+      resolveLocalAIProfileModel(profile, resolveLocalAITaskModelPurpose(input.feature))
     const result = await completeText({
       messages: [
         {
@@ -224,6 +232,7 @@ const resolveProfile = async (
   if (!profile) {
     throw new Error("Local AI profile not found")
   }
+  assertLocalAIProfileEnabled(profile)
   return profile
 }
 

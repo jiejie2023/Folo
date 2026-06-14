@@ -134,7 +134,7 @@ export const resolveLocalAIProfileId = (
   return settings.defaultProfileId
 }
 
-type LocalAIModelPurpose = "chat" | "summary" | "tasks" | "timeline" | "translation" | "tts"
+export type LocalAIModelPurpose = "chat" | "summary" | "tasks" | "timeline" | "translation" | "tts"
 
 type LocalAIModelConfiguration = Pick<
   DesktopLocalAIProfile,
@@ -165,6 +165,17 @@ export const resolveLocalAIProfileModel = (
     throw new Error(`No local AI model is configured for ${purpose}`)
   }
   return model
+}
+
+export const resolveLocalAITaskModelPurpose = (
+  feature: LocalAIFeature,
+): Extract<LocalAIModelPurpose, "tasks" | "timeline"> =>
+  feature === "timelineSummary" || feature === "timelineRanking" ? "timeline" : "tasks"
+
+export const assertLocalAIProfileEnabled = (profile: Pick<DesktopLocalAIProfile, "enabled">) => {
+  if (!profile.enabled) {
+    throw new Error("Local AI profile is disabled")
+  }
 }
 
 const LOCAL_AI_FEATURES: LocalAIFeature[] = [

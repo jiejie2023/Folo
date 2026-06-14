@@ -2,10 +2,12 @@ import type { LocalAISettings } from "@follow/shared/settings/interface"
 import { describe, expect, test } from "vitest"
 
 import {
+  assertLocalAIProfileEnabled,
   clearDeletedLocalAIDefaultProfile,
   resolveLocalAIProfileApiKey,
   resolveLocalAIProfileId,
   resolveLocalAIProfileModel,
+  resolveLocalAITaskModelPurpose,
 } from "./hooks"
 
 const createSettings = (overrides: Partial<LocalAISettings> = {}): LocalAISettings => ({
@@ -79,6 +81,52 @@ describe("resolveLocalAIProfileModel", () => {
         "translation",
       ),
     ).toThrow("No local AI model is configured for translation")
+  })
+})
+
+describe("resolveLocalAITaskModelPurpose", () => {
+  test.each(["timelineSummary", "timelineRanking"] as const)(
+    "uses the timeline model for %s",
+    (feature) => {
+      expect(resolveLocalAITaskModelPurpose(feature)).toBe("timeline")
+    },
+  )
+
+  test.each(["tasks", "onboardingRecommendations"] as const)(
+    "uses the task model for %s",
+    (feature) => {
+      expect(resolveLocalAITaskModelPurpose(feature)).toBe("tasks")
+    },
+  )
+
+  test("selects the configured timeline model for timeline tasks", () => {
+    const purpose = resolveLocalAITaskModelPurpose("timelineSummary")
+    expect(
+      resolveLocalAIProfileModel(
+        {
+          defaultChatModel: "chat-model",
+          defaultSummaryModel: null,
+          defaultTaskModel: "task-model",
+          defaultTimelineModel: "timeline-model",
+          defaultTranslationModel: null,
+          defaultTtsModel: null,
+          models: [],
+        },
+        purpose,
+      ),
+    ).toBe("timeline-model")
+  })
+})
+
+describe("assertLocalAIProfileEnabled", () => {
+  test("rejects a disabled profile", () => {
+    expect(() => assertLocalAIProfileEnabled({ enabled: false })).toThrow(
+      "Local AI profile is disabled",
+    )
+  })
+
+  test("allows an enabled profile", () => {
+    expect(() => assertLocalAIProfileEnabled({ enabled: true })).not.toThrow()
   })
 })
 
