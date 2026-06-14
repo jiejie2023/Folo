@@ -38,7 +38,10 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     return (await listDesktopProfiles()).map(toSharedProfile)
   },
   async saveProfile(input) {
-    const storedProfile = await upsertDesktopProfile(toDesktopProfileInput(input))
+    const existingProfile = input.id
+      ? (await listDesktopProfiles()).find((profile) => profile.id === input.id)
+      : undefined
+    const storedProfile = await upsertDesktopProfile(toDesktopProfileInput(input, existingProfile))
     const profile = (await listDesktopProfiles()).find((item) => item.id === storedProfile.id)
     if (!profile) {
       throw new Error("Saved local AI profile could not be reloaded")
@@ -253,26 +256,60 @@ const toSharedProfile = (profile: DesktopLocalAIProfile): LocalAIProfile => ({
   updatedAt: profile.updatedAt,
 })
 
-const toDesktopProfileInput = (input: LocalAIProfileInput): DesktopLocalAIProfileInput => ({
-  apiKey: input.apiKey,
-  baseURL: input.baseURL,
-  defaultChatModel: input.defaultModel ?? null,
-  defaultSummaryModel: input.defaultModel ?? null,
-  defaultTaskModel: input.defaultModel ?? null,
-  defaultTimelineModel: input.defaultModel ?? null,
-  defaultTranslationModel: input.defaultModel ?? null,
-  defaultTtsModel: input.defaultModel ?? null,
-  enabled: input.enabled,
-  headers: input.headers ?? {},
-  id: input.id,
-  models: input.defaultModel ? [input.defaultModel] : [],
-  name: input.name,
-  providerType: "openai-compatible",
-  supportsJsonMode: true,
-  supportsStreaming: true,
-  supportsTools: false,
-  supportsTts: false,
-})
+const toDesktopProfileInput = (
+  input: LocalAIProfileInput,
+  existingProfile?: DesktopLocalAIProfile,
+): DesktopLocalAIProfileInput => {
+  if (!existingProfile) {
+    return {
+      apiKey: input.apiKey,
+      baseURL: input.baseURL,
+      defaultChatModel: input.defaultModel ?? null,
+      defaultSummaryModel: input.defaultModel ?? null,
+      defaultTaskModel: input.defaultModel ?? null,
+      defaultTimelineModel: input.defaultModel ?? null,
+      defaultTranslationModel: input.defaultModel ?? null,
+      defaultTtsModel: input.defaultModel ?? null,
+      enabled: input.enabled,
+      headers: input.headers ?? {},
+      id: input.id,
+      models: input.defaultModel ? [input.defaultModel] : [],
+      name: input.name,
+      providerType: "openai-compatible",
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsTools: false,
+      supportsTts: false,
+    }
+  }
+
+  const models = [...existingProfile.models]
+  if (input.defaultModel && !models.includes(input.defaultModel)) {
+    models.push(input.defaultModel)
+  }
+
+  return {
+    apiKey: input.apiKey,
+    baseURL: input.baseURL,
+    defaultChatModel:
+      input.defaultModel === undefined ? existingProfile.defaultChatModel : input.defaultModel,
+    defaultSummaryModel: existingProfile.defaultSummaryModel,
+    defaultTaskModel: existingProfile.defaultTaskModel,
+    defaultTimelineModel: existingProfile.defaultTimelineModel,
+    defaultTranslationModel: existingProfile.defaultTranslationModel,
+    defaultTtsModel: existingProfile.defaultTtsModel,
+    enabled: input.enabled,
+    headers: input.headers ?? existingProfile.headers,
+    id: existingProfile.id,
+    models,
+    name: input.name,
+    providerType: existingProfile.providerType,
+    supportsJsonMode: existingProfile.supportsJsonMode,
+    supportsStreaming: existingProfile.supportsStreaming,
+    supportsTools: existingProfile.supportsTools,
+    supportsTts: existingProfile.supportsTts,
+  }
+}
 
 const stringifyMessageContent = (
   content: LocalAIChatCompletionInput["messages"][number]["content"],

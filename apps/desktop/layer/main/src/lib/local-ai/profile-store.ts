@@ -152,6 +152,26 @@ export const updateLocalAIProfileTestResult = (
   return updated
 }
 
+export const updateLocalAIProfileModels = (
+  profileId: string,
+  models: string[],
+): LocalAIStoredProfile | null => {
+  const profiles = readProfiles()
+  const existing = profiles.find((profile) => profile.id === profileId)
+  if (!existing) {
+    return null
+  }
+
+  const updated: LocalAIStoredProfile = {
+    ...existing,
+    models,
+    updatedAt: new Date().toISOString(),
+  }
+
+  writeProfiles(upsertProfile(profiles, updated))
+  return updated
+}
+
 const normalizeBaseURL = (baseURL: string): string => baseURL.trim().replace(/\/+$/, "")
 
 const sanitizeHeaders = (headers: Record<string, string>): Record<string, string> =>

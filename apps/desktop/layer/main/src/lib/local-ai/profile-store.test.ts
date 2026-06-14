@@ -7,6 +7,7 @@ import {
   listLocalAIProfiles,
   maskSecret,
   readLocalAIProfileSecret,
+  updateLocalAIProfileModels,
   upsertLocalAIProfile,
 } from "./profile-store"
 import type { LocalAIProfileUpsertInput } from "./types"
@@ -145,6 +146,38 @@ describe("local AI profile store", () => {
     expect(updated.name).toBe("Renamed")
     expect(readLocalAIProfileSecret(created.id)).toBe("sk-secret123456")
     expect(listLocalAIProfiles()[0]?.maskedApiKey).toBe("sk-...3456")
+  })
+
+  it("updates discovered models without replacing other profile data", () => {
+    const created = upsertLocalAIProfile(
+      createInput({
+        defaultSummaryModel: "summary-model",
+        defaultTaskModel: "task-model",
+        defaultTimelineModel: "timeline-model",
+        defaultTranslationModel: "translation-model",
+        defaultTtsModel: "tts-model",
+        headers: { "X-Public-Header": "public" },
+        supportsJsonMode: false,
+        supportsStreaming: false,
+        supportsTools: true,
+        supportsTts: true,
+      }),
+    )
+
+    const updated = updateLocalAIProfileModels(created.id, ["gpt-4.1", "gpt-4o-mini"])
+
+    expect(updated).toEqual({
+      ...created,
+      models: ["gpt-4.1", "gpt-4o-mini"],
+      updatedAt: expect.any(String),
+    })
+    expect(listLocalAIProfiles()[0]).toEqual({
+      ...created,
+      maskedApiKey: "sk-...3456",
+      models: ["gpt-4.1", "gpt-4o-mini"],
+      updatedAt: expect.any(String),
+    })
+    expect(readLocalAIProfileSecret(created.id)).toBe("sk-secret123456")
   })
 
   it.each([null, ""])("removes the existing secret when apiKey is %s", (apiKey) => {

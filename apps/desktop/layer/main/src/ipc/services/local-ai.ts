@@ -14,6 +14,7 @@ import {
   deleteLocalAIProfile,
   listLocalAIProfiles,
   readLocalAIProfileSecret,
+  updateLocalAIProfileModels,
   updateLocalAIProfileTestResult,
   upsertLocalAIProfile,
 } from "~/lib/local-ai/profile-store"
@@ -87,6 +88,7 @@ export class LocalAIService extends IpcService {
 
     try {
       const models = await listOpenAICompatibleModels({ apiKey, profile })
+      updateLocalAIProfileModels(profileId, models)
       updateLocalAIProfileTestResult?.(profileId, {
         message: `Found ${models.length} models`,
         ok: true,

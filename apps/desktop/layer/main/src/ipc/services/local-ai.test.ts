@@ -20,6 +20,7 @@ const {
   recordLocalAIUsage,
   streamOpenAICompatibleChat,
   synthesizeOpenAICompatibleSpeech,
+  updateLocalAIProfileModels,
   updateLocalAIProfileTestResult,
   upsertLocalAIProfile,
 } = vi.hoisted(() => ({
@@ -33,6 +34,7 @@ const {
   recordLocalAIUsage: vi.fn(),
   streamOpenAICompatibleChat: vi.fn(),
   synthesizeOpenAICompatibleSpeech: vi.fn(),
+  updateLocalAIProfileModels: vi.fn(),
   updateLocalAIProfileTestResult: vi.fn(),
   upsertLocalAIProfile: vi.fn(),
 }))
@@ -53,6 +55,7 @@ vi.mock("~/lib/local-ai/profile-store", () => ({
   deleteLocalAIProfile,
   listLocalAIProfiles,
   readLocalAIProfileSecret,
+  updateLocalAIProfileModels,
   updateLocalAIProfileTestResult,
   upsertLocalAIProfile,
 }))
@@ -136,6 +139,7 @@ describe("LocalAIService", () => {
       apiKey: "sk-secret-raw",
       profile: storedProfile,
     })
+    expect(updateLocalAIProfileModels).toHaveBeenCalledWith("profile-1", ["llama3", "nomic-embed"])
     expect(updateLocalAIProfileTestResult).toHaveBeenCalledWith(
       "profile-1",
       expect.objectContaining({ message: "Found 2 models", ok: true }),
