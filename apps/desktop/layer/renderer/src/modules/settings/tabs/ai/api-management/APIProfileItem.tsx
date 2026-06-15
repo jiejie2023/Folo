@@ -27,10 +27,14 @@ export const APIProfileItem = ({ onDelete, onEdit, profile }: APIProfileItemProp
       const result = await localAIIPC.testProfile(profile.id)
       await queryClient.invalidateQueries({ queryKey: localAIQueryKeys.profiles })
       toast.success(
-        t("api_management.profile.test_succeeded", {
-          count: result.models.length,
-          model: result.model,
-        }),
+        result.modelsWarning
+          ? t("api_management.profile.test_succeeded_without_models", {
+              model: result.model,
+            })
+          : t("api_management.profile.test_succeeded", {
+              count: result.models.length,
+              model: result.model,
+            }),
       )
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t("api_management.profile.test_failed"))

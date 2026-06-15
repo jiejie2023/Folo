@@ -174,6 +174,38 @@ describe("LocalAIService", () => {
     )
   })
 
+  it("continues profile tests with a configured model when model listing is unavailable", async () => {
+    listOpenAICompatibleModels.mockRejectedValue(new Error("models endpoint disabled"))
+    completeOpenAICompatibleText.mockResolvedValue({ text: "OK", totalTokens: 2 })
+    const service = new LocalAIService()
+
+    await expect(service.testProfile(context, "profile-1")).resolves.toEqual(
+      expect.objectContaining({
+        model: "llama3",
+        models: [],
+        modelsWarning: "models endpoint disabled",
+        ok: true,
+      }),
+    )
+
+    expect(updateLocalAIProfileModels).not.toHaveBeenCalled()
+    expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
+      apiKey: "sk-secret-raw",
+      maxTokens: 4,
+      messages: [{ content: "Reply with OK.", role: "user" }],
+      model: "llama3",
+      profile: storedProfile,
+      temperature: 0,
+    })
+    expect(updateLocalAIProfileTestResult).toHaveBeenCalledWith(
+      "profile-1",
+      expect.objectContaining({
+        message: "Connection test succeeded with llama3; model list unavailable",
+        ok: true,
+      }),
+    )
+  })
+
   it("returns completeText result and records successful usage", async () => {
     const result: LocalAITextResult = { text: "Hello", totalTokens: 12 }
     completeOpenAICompatibleText.mockResolvedValue(result)

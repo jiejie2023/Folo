@@ -65,6 +65,7 @@ type LocalAIProfileTestResult = {
   message: string
   model: string
   models: string[]
+  modelsWarning?: string
   ok: boolean
   testedAt: string
 }
@@ -131,11 +132,11 @@ export class LocalAIService extends IpcService {
       const resolved = resolveProfile(profileId)
       apiKey = resolved.apiKey
 
-      const models = await listOpenAICompatibleModels({
+      const { models, warning: modelsWarning } = await listProfileModelsForTest({
         apiKey: resolved.apiKey,
         profile: resolved.profile,
+        profileId,
       })
-      updateLocalAIProfileModels(profileId, models)
 
       const model =
         modelOverride ??
@@ -156,7 +157,9 @@ export class LocalAIService extends IpcService {
       })
 
       const testedAt = new Date().toISOString()
-      const message = `Connection test succeeded with ${model}`
+      const message = modelsWarning
+        ? `Connection test succeeded with ${model}; model list unavailable`
+        : `Connection test succeeded with ${model}`
       updateLocalAIProfileTestResult?.(profileId, {
         message,
         ok: true,
@@ -167,6 +170,7 @@ export class LocalAIService extends IpcService {
         message,
         model,
         models,
+        ...(modelsWarning ? { modelsWarning } : {}),
         ok: true,
         testedAt,
       }
@@ -387,6 +391,27 @@ const resolveProfile = (profileId: string): ResolvedProfile => {
 const toStoredProfile = (profile: LocalAIProfileView): LocalAIStoredProfile => {
   const { maskedApiKey: _maskedApiKey, ...storedProfile } = profile
   return storedProfile
+}
+
+const listProfileModelsForTest = async ({
+  apiKey,
+  profile,
+  profileId,
+}: {
+  apiKey: string
+  profile: LocalAIStoredProfile
+  profileId: string
+}): Promise<{ models: string[]; warning?: string }> => {
+  try {
+    const models = await listOpenAICompatibleModels({ apiKey, profile })
+    updateLocalAIProfileModels(profileId, models)
+    return { models }
+  } catch (error) {
+    return {
+      models: profile.models,
+      warning: sanitizeErrorMessage(error, apiKey),
+    }
+  }
 }
 
 const recordUsage = (input: {

@@ -94,6 +94,7 @@
   "api_management.profile.test": "Test",
   "api_management.profile.test_failed": "Connection test failed",
   "api_management.profile.test_succeeded": "Connection test succeeded with {{model}} ({{count}} models)",
+  "api_management.profile.test_succeeded_without_models": "Connection test succeeded with {{model}}. Model listing is unavailable.",
   "api_management.profile.validation.base_url_required": "Base URL is required",
   "api_management.profile.validation.invalid_url": "Enter a valid URL",
   "api_management.profile.validation.name_required": "Name is required",

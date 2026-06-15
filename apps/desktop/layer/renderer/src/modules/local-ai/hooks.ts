@@ -85,6 +85,7 @@ export type DesktopLocalAIProfileTestResult = {
   message: string
   model: string
   models: string[]
+  modelsWarning?: string
   ok: boolean
   testedAt: string
 }
