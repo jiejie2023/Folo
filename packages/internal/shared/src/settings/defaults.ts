@@ -163,6 +163,7 @@ export const defaultAISettings: AISettings = {
   personalizePrompt: "",
   aiTimelinePrompt: "",
   shortcuts: [],
+  aiTasks: [],
 
   // MCP Services
   mcpEnabled: false,

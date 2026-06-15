@@ -152,6 +152,8 @@ const LOCAL_AI_RUNTIME_FEATURES = new Set<LocalAIFeature>([
   "timelineRanking",
   "timelineSummary",
   "tts",
+  "tasks",
+  "mcp",
 ])
 
 export const canRouteLocalAIFeature = (feature: LocalAIFeature): boolean =>

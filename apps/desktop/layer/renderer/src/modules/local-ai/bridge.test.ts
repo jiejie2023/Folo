@@ -174,6 +174,62 @@ describe("createDesktopLocalAIBridge testProfile", () => {
   })
 })
 
+describe("createDesktopLocalAIBridge MCP", () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    const { getAISettings } = await import("~/atoms/settings/ai")
+    vi.mocked(getAISettings).mockReturnValue({
+      localAI: {
+        allowFallbackToCloud: false,
+        defaultProfileId: "profile-1",
+        enabled: true,
+        featureRouting: {
+          chat: "cloud",
+          mcp: "local",
+          onboardingRecommendations: "cloud",
+          summary: "cloud",
+          tasks: "cloud",
+          timelineRanking: "cloud",
+          timelineSummary: "cloud",
+          translation: "cloud",
+          tts: "cloud",
+        },
+      },
+      mcpServices: [
+        {
+          createdAt: "2026-06-15T00:00:00.000Z",
+          enabled: true,
+          id: "local-mcp-1",
+          isConnected: false,
+          lastError: "Local MCP tool discovery is not implemented yet.",
+          lastUsed: null,
+          name: "Local MCP",
+          promptCount: 0,
+          resourceCount: 0,
+          toolCount: 0,
+          transportType: "streamable-http",
+          url: "https://example.com/mcp",
+        },
+      ],
+    } as ReturnType<typeof getAISettings>)
+  })
+
+  it("lists local MCP services as MCP servers", async () => {
+    const bridge = createDesktopLocalAIBridge()
+
+    await expect(bridge.listMCPServers()).resolves.toEqual([
+      {
+        connected: false,
+        enabled: true,
+        id: "local-mcp-1",
+        lastError: "Local MCP tool discovery is not implemented yet.",
+        name: "Local MCP",
+        toolCount: 0,
+      },
+    ])
+  })
+})
+
 describe("createDesktopLocalAIBridge translateEntries", () => {
   beforeEach(() => {
     vi.clearAllMocks()

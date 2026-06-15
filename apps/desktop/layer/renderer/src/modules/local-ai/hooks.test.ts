@@ -35,12 +35,12 @@ describe("resolveLocalAIProfileId", () => {
     const settings = createSettings({
       featureRouting: {
         ...createSettings().featureRouting,
-        tasks: "local",
+        onboardingRecommendations: "local",
       },
     })
 
-    expect(resolveLocalAIMode(settings, "tasks")).toBe("cloud")
-    expect(resolveLocalAIProfileId(settings, "tasks")).toBeNull()
+    expect(resolveLocalAIMode(settings, "onboardingRecommendations")).toBe("cloud")
+    expect(resolveLocalAIProfileId(settings, "onboardingRecommendations")).toBeNull()
   })
 
   test("allows timeline ranking to route to local AI", () => {
@@ -53,6 +53,30 @@ describe("resolveLocalAIProfileId", () => {
 
     expect(resolveLocalAIMode(settings, "timelineRanking")).toBe("local")
     expect(resolveLocalAIProfileId(settings, "timelineRanking")).toBe("profile-1")
+  })
+
+  test("allows scheduled tasks to route to local AI", () => {
+    const settings = createSettings({
+      featureRouting: {
+        ...createSettings().featureRouting,
+        tasks: "local",
+      },
+    })
+
+    expect(resolveLocalAIMode(settings, "tasks")).toBe("local")
+    expect(resolveLocalAIProfileId(settings, "tasks")).toBe("profile-1")
+  })
+
+  test("allows MCP to route to local AI", () => {
+    const settings = createSettings({
+      featureRouting: {
+        ...createSettings().featureRouting,
+        mcp: "local",
+      },
+    })
+
+    expect(resolveLocalAIMode(settings, "mcp")).toBe("local")
+    expect(resolveLocalAIProfileId(settings, "mcp")).toBe("profile-1")
   })
 
   test("returns the default profile id when local AI is enabled and the feature routes locally", () => {

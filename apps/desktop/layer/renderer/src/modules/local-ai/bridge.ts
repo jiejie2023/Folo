@@ -203,14 +203,26 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     } satisfies LocalAITaskResult
   },
   async listMCPServers() {
-    return []
+    return getAISettings().mcpServices.map((service) => ({
+      connected: service.isConnected,
+      enabled: service.enabled,
+      id: service.id,
+      lastError: service.lastError,
+      name: service.name,
+      toolCount: service.toolCount,
+    }))
   },
   async listTools() {
     return []
   },
   async callTool() {
     return {
-      content: [],
+      content: [
+        {
+          text: "Local MCP tool execution is not implemented yet.",
+          type: "text",
+        },
+      ],
       isError: true,
     } satisfies LocalAIToolCallResult
   },
