@@ -252,6 +252,19 @@ export const clearDeletedLocalAIDefaultProfile = (
   }
 }
 
+export const applySavedLocalAIProfileDefaults = (
+  settings: LocalAISettings,
+  savedProfileId: string,
+): LocalAISettings => {
+  if (settings.defaultProfileId !== null) return settings
+
+  return {
+    ...settings,
+    defaultProfileId: savedProfileId,
+    enabled: true,
+  }
+}
+
 export const resolveLocalAIProfileApiKey = ({
   apiKey,
   isEditing,

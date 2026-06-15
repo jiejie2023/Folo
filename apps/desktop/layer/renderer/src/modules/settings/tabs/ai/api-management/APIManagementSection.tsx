@@ -16,6 +16,7 @@ import { getAISettings, setAISetting, useAISettingValue } from "~/atoms/settings
 import { useDialog, useModalStack } from "~/components/ui/modal/stacked/hooks"
 import type { DesktopLocalAIProfile, DesktopLocalAIProfileInput } from "~/modules/local-ai/hooks"
 import {
+  applySavedLocalAIProfileDefaults,
   clearDeletedLocalAIDefaultProfile,
   getLocalAIIPC,
   localAIQueryKeys,
@@ -41,7 +42,9 @@ export const APIManagementSection = () => {
       if (!localAIIPC) throw new Error(t("api_management.ipc_unavailable"))
       return localAIIPC.upsertProfile(profile)
     },
-    onSuccess: async () => {
+    onSuccess: async (savedProfile) => {
+      const latestSettings = getAISettings().localAI
+      setAISetting("localAI", applySavedLocalAIProfileDefaults(latestSettings, savedProfile.id))
       await queryClient.invalidateQueries({ queryKey: localAIQueryKeys.profiles })
       toast.success(t("api_management.profile.saved"))
     },

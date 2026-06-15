@@ -2,6 +2,7 @@ import type { LocalAISettings } from "@follow/shared/settings/interface"
 import { describe, expect, test } from "vitest"
 
 import {
+  applySavedLocalAIProfileDefaults,
   assertLocalAIProfileEnabled,
   clearDeletedLocalAIDefaultProfile,
   resolveLocalAIMode,
@@ -167,6 +168,34 @@ describe("clearDeletedLocalAIDefaultProfile", () => {
   test("returns unchanged settings when another profile is deleted", () => {
     const settings = createSettings()
     expect(clearDeletedLocalAIDefaultProfile(settings, "profile-2")).toBe(settings)
+  })
+})
+
+describe("applySavedLocalAIProfileDefaults", () => {
+  test("sets the saved profile as default and enables local AI when no default exists", () => {
+    expect(
+      applySavedLocalAIProfileDefaults(
+        createSettings({
+          defaultProfileId: null,
+          enabled: false,
+        }),
+        "profile-1",
+      ),
+    ).toEqual(
+      createSettings({
+        defaultProfileId: "profile-1",
+        enabled: true,
+      }),
+    )
+  })
+
+  test("does not replace an existing default profile", () => {
+    const settings = createSettings({
+      defaultProfileId: "profile-1",
+      enabled: false,
+    })
+
+    expect(applySavedLocalAIProfileDefaults(settings, "profile-2")).toBe(settings)
   })
 })
 
