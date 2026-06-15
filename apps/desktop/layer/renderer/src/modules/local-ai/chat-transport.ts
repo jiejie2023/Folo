@@ -27,6 +27,7 @@ type LocalAIChatTransportOptions = {
 type SendMessagesOptions = Parameters<ChatTransport<BizUIMessage>["sendMessages"]>[0]
 
 type LocalChatRequest = {
+  mcpServers: NonNullable<Parameters<DesktopLocalAIIPC["startChatStream"]>[0]["mcpServers"]>
   messages: DesktopLocalAICompleteTextInput["messages"]
   model: string
   profile: DesktopLocalAIProfile
@@ -94,7 +95,7 @@ class LocalAIChatTransport implements ChatTransport<BizUIMessage> {
       this.options.feature ?? "chat",
     )
 
-    if (!request.profile.supportsStreaming) {
+    if (!request.profile.supportsStreaming && request.mcpServers.length === 0) {
       return createCompleteTextChunkStream({
         abortSignal,
         input: {
@@ -114,6 +115,7 @@ class LocalAIChatTransport implements ChatTransport<BizUIMessage> {
 
     const { streamId } = await startLocalChatStream(localAIIPC, {
       feature: request.feature,
+      ...(request.mcpServers.length > 0 ? { mcpServers: request.mcpServers } : {}),
       messages: request.messages,
       model: request.model,
       profileId: request.profileId,
@@ -133,7 +135,8 @@ const createLocalChatRequest = async (
   messages: BizUIMessage[],
   feature: LocalAIFeature,
 ): Promise<LocalChatRequest> => {
-  const settings = getAISettings().localAI
+  const aiSettings = getAISettings()
+  const settings = aiSettings.localAI
   const profileId = resolveLocalAIProfileId(settings, feature)
   if (!profileId) {
     throw new LocalAIChatSetupError(`Local AI profile is not configured for ${feature}`)
@@ -165,6 +168,21 @@ const createLocalChatRequest = async (
     messages: buildLocalChatMessages(messages),
     feature,
     model,
+    mcpServers:
+      profile.supportsTools &&
+      aiSettings.mcpEnabled &&
+      resolveLocalAIProfileId(settings, "mcp") !== null
+        ? aiSettings.mcpServices
+            .filter((service) => service.enabled && Boolean(service.url))
+            .map((service) => ({
+              enabled: service.enabled,
+              headers: service.headers,
+              id: service.id,
+              name: service.name,
+              transportType: service.transportType,
+              url: service.url,
+            }))
+        : [],
     profile,
     profileId,
   }

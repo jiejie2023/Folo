@@ -5,10 +5,29 @@ type FetchFn = (input: string, init?: RequestInit) => Promise<Response>
 type OpenAICompatibleResponseFormat = "json_object"
 
 type OpenAICompatibleChatRequestMessage = {
-  content: string
+  content: string | null
   name?: string
   role: LocalAIChatMessage["role"]
   tool_call_id?: string
+  tool_calls?: LocalAIToolCall[]
+}
+
+export type LocalAIChatTool = {
+  function: {
+    description?: string
+    name: string
+    parameters?: Record<string, unknown>
+  }
+  type: "function"
+}
+
+export type LocalAIToolCall = {
+  function: {
+    arguments: string
+    name: string
+  }
+  id: string
+  type: "function"
 }
 
 type ModelListItem = {
@@ -31,6 +50,8 @@ type ChatChoice = {
 
 type ChatMessageResponse = {
   content?: unknown
+  role?: unknown
+  tool_calls?: unknown
 }
 
 type ChatDeltaResponse = {
@@ -121,6 +142,7 @@ export const completeOpenAICompatibleText = async ({
 export const streamOpenAICompatibleChat = async ({
   abortSignal,
   apiKey,
+  callTool,
   fetchFn = fetch,
   maxTokens,
   messages,
@@ -128,9 +150,11 @@ export const streamOpenAICompatibleChat = async ({
   onDelta,
   profile,
   temperature,
+  tools,
 }: {
   abortSignal?: AbortSignal
   apiKey: string
+  callTool?: (toolCall: LocalAIToolCall) => Promise<string>
   fetchFn?: FetchFn
   maxTokens?: number
   messages: LocalAIChatMessage[]
@@ -138,12 +162,99 @@ export const streamOpenAICompatibleChat = async ({
   onDelta: (deltaText: string) => void
   profile: LocalAIStoredProfile
   temperature?: number
+  tools?: LocalAIChatTool[]
 }): Promise<LocalAITextResult> => {
+  let requestMessages: OpenAICompatibleChatRequestMessage[] = serializeMessages(messages)
+  let totalTokens: number | null = null
+
+  if (tools?.length && callTool) {
+    const planningResponse = await fetchFn(buildEndpoint(profile.baseURL, "/chat/completions"), {
+      body: JSON.stringify(
+        compactObject({
+          max_tokens: maxTokens,
+          messages: requestMessages,
+          model,
+          stream: false,
+          temperature,
+          tool_choice: "auto",
+          tools,
+        }),
+      ),
+      headers: buildHeaders(profile, apiKey, true),
+      method: "POST",
+      signal: abortSignal,
+    })
+    await assertOK(planningResponse, apiKey)
+
+    const planningPayload = (await planningResponse.json()) as ChatCompletionResponse
+    totalTokens = getTotalTokens(planningPayload.usage)
+    const planningMessage = getFirstResponseMessage(planningPayload)
+    const toolCalls = getToolCalls(planningMessage)
+
+    if (toolCalls.length === 0) {
+      const text = getMessageContent(planningMessage)
+      if (text === null) {
+        throw new Error("OpenAI-compatible response was malformed: missing message content")
+      }
+      if (text) onDelta(text)
+      return { text, totalTokens }
+    }
+
+    const toolResults = await Promise.all(
+      toolCalls.map(
+        async (toolCall): Promise<OpenAICompatibleChatRequestMessage> => ({
+          content: await executeToolSafely(callTool, toolCall),
+          role: "tool",
+          tool_call_id: toolCall.id,
+        }),
+      ),
+    )
+    requestMessages = [
+      ...requestMessages,
+      { content: null, role: "assistant", tool_calls: toolCalls },
+      ...toolResults,
+    ]
+  }
+
+  if (!profile.supportsStreaming) {
+    const response = await fetchFn(buildEndpoint(profile.baseURL, "/chat/completions"), {
+      body: JSON.stringify(
+        compactObject({
+          max_tokens: maxTokens,
+          messages: requestMessages,
+          model,
+          stream: false,
+          temperature,
+        }),
+      ),
+      headers: buildHeaders(profile, apiKey, true),
+      method: "POST",
+      signal: abortSignal,
+    })
+    await assertOK(response, apiKey)
+    const payload = (await response.json()) as ChatCompletionResponse
+    const text = getFirstMessageContent(payload)
+    if (text === null) {
+      throw new Error("OpenAI-compatible response was malformed: missing message content")
+    }
+    if (text) onDelta(text)
+    const finalTokens = getTotalTokens(payload.usage)
+    return {
+      text,
+      totalTokens:
+        totalTokens === null
+          ? finalTokens
+          : finalTokens === null
+            ? totalTokens
+            : totalTokens + finalTokens,
+    }
+  }
+
   const response = await fetchFn(buildEndpoint(profile.baseURL, "/chat/completions"), {
     body: JSON.stringify(
       compactObject({
         max_tokens: maxTokens,
-        messages: serializeMessages(messages),
+        messages: requestMessages,
         model,
         stream: true,
         temperature,
@@ -164,7 +275,6 @@ export const streamOpenAICompatibleChat = async ({
   const decoder = new TextDecoder()
   let buffer = ""
   let text = ""
-  let totalTokens: number | null = null
   let done = false
 
   while (!done) {
@@ -183,7 +293,7 @@ export const streamOpenAICompatibleChat = async ({
       const payload = parseStreamEvent(event)
       const usageTokens = getTotalTokens(payload.usage)
       if (usageTokens !== null) {
-        totalTokens = usageTokens
+        totalTokens = (totalTokens ?? 0) + usageTokens
       }
 
       for (const delta of getDeltaContents(payload)) {
@@ -347,6 +457,10 @@ const sanitizeErrorDetail = (detail: string | null, apiKey: string): string | nu
 }
 
 const getFirstMessageContent = (payload: ChatCompletionResponse): string | null => {
+  return getMessageContent(getFirstResponseMessage(payload))
+}
+
+const getFirstResponseMessage = (payload: ChatCompletionResponse): ChatMessageResponse | null => {
   if (!Array.isArray(payload.choices)) {
     return null
   }
@@ -361,13 +475,35 @@ const getFirstMessageContent = (payload: ChatCompletionResponse): string | null 
       continue
     }
 
-    const message = chatChoice.message as ChatMessageResponse
-    if (typeof message.content === "string") {
-      return message.content
-    }
+    return chatChoice.message as ChatMessageResponse
   }
 
   return null
+}
+
+const getMessageContent = (message: ChatMessageResponse | null): string | null =>
+  message && typeof message.content === "string" ? message.content : null
+
+const getToolCalls = (message: ChatMessageResponse | null): LocalAIToolCall[] => {
+  if (!message || !Array.isArray(message.tool_calls)) return []
+
+  return message.tool_calls.filter((value): value is LocalAIToolCall => {
+    if (!isRecord(value) || value.type !== "function" || typeof value.id !== "string") return false
+    if (!isRecord(value.function)) return false
+    return typeof value.function.name === "string" && typeof value.function.arguments === "string"
+  })
+}
+
+const executeToolSafely = async (
+  callTool: (toolCall: LocalAIToolCall) => Promise<string>,
+  toolCall: LocalAIToolCall,
+): Promise<string> => {
+  try {
+    return await callTool(toolCall)
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `Tool execution failed: ${message}`
+  }
 }
 
 const getDeltaContents = (payload: ChatCompletionResponse): string[] => {

@@ -4,7 +4,7 @@ import { nanoid } from "nanoid"
 
 import { getAISettings, setAISetting } from "~/atoms/settings/ai"
 import { followApi } from "~/lib/api-client"
-import { getLocalAIProfileId } from "~/modules/local-ai/hooks"
+import { getLocalAIIPC, getLocalAIProfileId } from "~/modules/local-ai/hooks"
 
 type MCPConnectionInput = {
   name: string
@@ -96,18 +96,40 @@ export const refreshMCPTools = async (connectionIds?: string[]): Promise<void> =
   if (isLocalMCPMode()) {
     const localServices = getLocalMCPServices()
     const connectionIdSet = connectionIds ? new Set(connectionIds) : null
+    const targets = localServices.filter(
+      (service) => !connectionIdSet || connectionIdSet.has(service.id),
+    )
+    const localAIIPC = requireLocalAIIPC()
+    const results = await Promise.allSettled(
+      targets.map(async (service) => ({
+        service,
+        tools: await localAIIPC.listMCPTools(toLocalMCPConnection(service)),
+      })),
+    )
+    const updates = new Map<string, Partial<MCPService>>()
+    const errors: string[] = []
+
+    results.forEach((result, index) => {
+      const service = targets[index]!
+      if (result.status === "fulfilled") {
+        updates.set(service.id, {
+          isConnected: true,
+          lastError: undefined,
+          toolCount: result.value.tools.length,
+        })
+      } else {
+        const message = getErrorMessage(result.reason)
+        updates.set(service.id, { isConnected: false, lastError: message, toolCount: 0 })
+        errors.push(`${service.name}: ${message}`)
+      }
+    })
+
     setLocalMCPServices(
       localServices.map((service) =>
-        connectionIdSet && !connectionIdSet.has(service.id)
-          ? service
-          : {
-              ...service,
-              isConnected: false,
-              lastError: "Local MCP tool discovery is not implemented yet.",
-              toolCount: 0,
-            },
+        updates.has(service.id) ? { ...service, ...updates.get(service.id) } : service,
       ),
     )
+    if (errors.length > 0) throw new Error(errors.join("; "))
     return
   }
 
@@ -116,12 +138,32 @@ export const refreshMCPTools = async (connectionIds?: string[]): Promise<void> =
 
 export const getMCPTools = async (connectionId: string) => {
   if (isLocalMCPMode()) {
-    return []
+    const service = getLocalMCPServices().find((item) => item.id === connectionId)
+    if (!service) throw new Error("Local MCP connection not found")
+    return requireLocalAIIPC().listMCPTools(toLocalMCPConnection(service))
   }
 
   const response = await followApi.mcp.getTools({ connectionId })
   return response.data
 }
+
+const requireLocalAIIPC = () => {
+  const ipc = getLocalAIIPC()
+  if (!ipc) throw new Error("Local AI IPC is unavailable")
+  return ipc
+}
+
+const toLocalMCPConnection = (service: MCPService) => {
+  if (!service.url) throw new Error(`MCP service ${service.name} has no endpoint URL`)
+  return {
+    headers: service.headers ?? {},
+    transportType: service.transportType,
+    url: service.url,
+  }
+}
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error)
 
 // Query key factory for MCP queries
 export const mcpQueryKeys = {

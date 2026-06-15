@@ -228,6 +228,158 @@ describe("OpenAI-compatible local AI client", () => {
     expect(calls[0]?.init?.signal).toBe(controller.signal)
   })
 
+  it("executes requested tools before streaming the final answer", async () => {
+    const deltas: string[] = []
+    const calls: FetchCall[] = []
+    const fetchFn = vi.fn((url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ init, url: String(url) })
+      if (calls.length === 1) {
+        return Promise.resolve(
+          Response.json({
+            choices: [
+              {
+                message: {
+                  content: null,
+                  role: "assistant",
+                  tool_calls: [
+                    {
+                      function: { arguments: '{"q":"folo"}', name: "search" },
+                      id: "call-1",
+                      type: "function",
+                    },
+                  ],
+                },
+              },
+            ],
+          }),
+        )
+      }
+
+      return Promise.resolve(
+        new Response(
+          createSSEStream([
+            'data: {"choices":[{"delta":{"content":"Found it"}}]}\n\n',
+            "data: [DONE]\n\n",
+          ]),
+          {
+            headers: { "Content-Type": "text/event-stream" },
+          },
+        ),
+      )
+    })
+    const callTool = vi.fn(async () => "tool result")
+    const tools = [
+      {
+        function: {
+          description: "Search docs",
+          name: "search",
+          parameters: { properties: { q: { type: "string" } }, type: "object" },
+        },
+        type: "function" as const,
+      },
+    ]
+
+    const result = await streamOpenAICompatibleChat({
+      apiKey: "sk-secret",
+      callTool,
+      fetchFn,
+      messages,
+      model: "gpt-4o-mini",
+      onDelta: (delta) => deltas.push(delta),
+      profile: createProfile({ supportsTools: true }),
+      tools,
+    })
+
+    expect(result.text).toBe("Found it")
+    expect(deltas).toEqual(["Found it"])
+    expect(callTool).toHaveBeenCalledWith({
+      function: { arguments: '{"q":"folo"}', name: "search" },
+      id: "call-1",
+      type: "function",
+    })
+    expect(readRequestJson(calls[0]?.init)).toEqual({
+      messages,
+      model: "gpt-4o-mini",
+      stream: false,
+      tool_choice: "auto",
+      tools,
+    })
+    expect(readRequestJson(calls[1]?.init)).toEqual({
+      messages: [
+        ...messages,
+        {
+          content: null,
+          role: "assistant",
+          tool_calls: [
+            {
+              function: { arguments: '{"q":"folo"}', name: "search" },
+              id: "call-1",
+              type: "function",
+            },
+          ],
+        },
+        { content: "tool result", role: "tool", tool_call_id: "call-1" },
+      ],
+      model: "gpt-4o-mini",
+      stream: true,
+    })
+  })
+
+  it("returns a non-streaming final answer after tool execution when streaming is disabled", async () => {
+    const responses = [
+      Response.json({
+        choices: [
+          {
+            message: {
+              content: null,
+              role: "assistant",
+              tool_calls: [
+                {
+                  function: { arguments: "{}", name: "status" },
+                  id: "call-1",
+                  type: "function",
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      Response.json({
+        choices: [{ message: { content: "Everything is healthy" } }],
+        usage: { total_tokens: 8 },
+      }),
+    ]
+    const fetchFn = vi.fn((_url: string | URL | Request, _init?: RequestInit) => {
+      const response = responses.shift()
+      if (!response) throw new Error("Unexpected request")
+      return Promise.resolve(response)
+    })
+    const deltas: string[] = []
+
+    await expect(
+      streamOpenAICompatibleChat({
+        apiKey: "sk-secret",
+        callTool: vi.fn().mockResolvedValue("healthy"),
+        fetchFn,
+        messages,
+        model: "gpt-4o-mini",
+        onDelta: (delta) => deltas.push(delta),
+        profile: createProfile({ supportsStreaming: false, supportsTools: true }),
+        tools: [
+          {
+            function: { name: "status", parameters: { type: "object" } },
+            type: "function",
+          },
+        ],
+      }),
+    ).resolves.toEqual({ text: "Everything is healthy", totalTokens: 8 })
+
+    expect(deltas).toEqual(["Everything is healthy"])
+    expect(readRequestJson(fetchFn.mock.calls[1]?.[1])).toEqual(
+      expect.objectContaining({ stream: false }),
+    )
+  })
+
   it("rejects truncated SSE data at EOF", async () => {
     const response = new Response(createSSEStream(['data: {"choices"']), {
       headers: { "Content-Type": "text/event-stream" },

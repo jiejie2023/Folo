@@ -232,6 +232,75 @@ describe("createLocalAIChatTransport", () => {
     expect(messages[0]!.content).toContain("Readable article body")
   })
 
+  it("passes enabled local MCP services to tool-capable local chat profiles", async () => {
+    const ipc = createIPC({
+      listProfiles: vi
+        .fn()
+        .mockResolvedValue([{ ...profile, supportsStreaming: false, supportsTools: true }]),
+    })
+    mocks.getLocalAIIPC.mockReturnValue(ipc)
+    mocks.getAISettings.mockReturnValue({
+      localAI: {
+        allowFallbackToCloud: false,
+        defaultProfileId: "profile-1",
+        enabled: true,
+        featureRouting: {
+          chat: "local",
+          mcp: "local",
+          onboardingRecommendations: "cloud",
+          summary: "cloud",
+          tasks: "cloud",
+          timelineRanking: "cloud",
+          timelineSummary: "cloud",
+          translation: "cloud",
+          tts: "cloud",
+        },
+      },
+      mcpEnabled: true,
+      mcpServices: [
+        {
+          createdAt: "2026-06-15T00:00:00.000Z",
+          enabled: true,
+          headers: { Authorization: "Bearer token" },
+          id: "local-mcp-1",
+          isConnected: true,
+          lastUsed: null,
+          name: "Local MCP",
+          promptCount: 0,
+          resourceCount: 0,
+          toolCount: 1,
+          transportType: "streamable-http",
+          url: "https://mcp.example.com/api",
+        },
+      ],
+    })
+    const transport = createTransport()
+
+    await transport.sendMessages({
+      abortSignal: undefined,
+      chatId: "chat-1",
+      messageId: undefined,
+      messages: [createMessage([{ type: "text", text: "Search docs" }])],
+      trigger: "submit-message",
+    })
+
+    expect(ipc.startChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        mcpServers: [
+          {
+            enabled: true,
+            headers: { Authorization: "Bearer token" },
+            id: "local-mcp-1",
+            name: "Local MCP",
+            transportType: "streamable-http",
+            url: "https://mcp.example.com/api",
+          },
+        ],
+      }),
+    )
+    expect(ipc.completeText).not.toHaveBeenCalled()
+  })
+
   it("includes the personalized AI prompt in local chat system messages", async () => {
     const ipc = createIPC()
     mocks.getLocalAIIPC.mockReturnValue(ipc)

@@ -4,7 +4,9 @@ import { createDesktopLocalAIBridge } from "./bridge"
 import type { DesktopLocalAIProfile, DesktopLocalAIStoredProfile } from "./hooks"
 
 const mocks = vi.hoisted(() => ({
+  callMCPTool: vi.fn(),
   completeText: vi.fn(),
+  listMCPTools: vi.fn(),
   listProfiles: vi.fn(),
   testProfile: vi.fn(),
   upsertProfile: vi.fn(),
@@ -17,8 +19,10 @@ vi.mock("~/atoms/settings/ai", () => ({
 vi.mock("./hooks", () => ({
   assertLocalAIProfileEnabled: vi.fn(),
   getLocalAIIPC: () => ({
+    callMCPTool: mocks.callMCPTool,
     completeText: mocks.completeText,
     listProfiles: mocks.listProfiles,
+    listMCPTools: mocks.listMCPTools,
     testProfile: mocks.testProfile,
     upsertProfile: mocks.upsertProfile,
   }),
@@ -177,6 +181,12 @@ describe("createDesktopLocalAIBridge testProfile", () => {
 describe("createDesktopLocalAIBridge MCP", () => {
   beforeEach(async () => {
     vi.clearAllMocks()
+    mocks.listMCPTools.mockResolvedValue([
+      { description: "Search docs", inputSchema: { type: "object" }, name: "search" },
+    ])
+    mocks.callMCPTool.mockResolvedValue({
+      content: [{ text: "tool result", type: "text" }],
+    })
     const { getAISettings } = await import("~/atoms/settings/ai")
     vi.mocked(getAISettings).mockReturnValue({
       localAI: {
@@ -200,13 +210,12 @@ describe("createDesktopLocalAIBridge MCP", () => {
           createdAt: "2026-06-15T00:00:00.000Z",
           enabled: true,
           id: "local-mcp-1",
-          isConnected: false,
-          lastError: "Local MCP tool discovery is not implemented yet.",
+          isConnected: true,
           lastUsed: null,
           name: "Local MCP",
           promptCount: 0,
           resourceCount: 0,
-          toolCount: 0,
+          toolCount: 1,
           transportType: "streamable-http",
           url: "https://example.com/mcp",
         },
@@ -219,14 +228,41 @@ describe("createDesktopLocalAIBridge MCP", () => {
 
     await expect(bridge.listMCPServers()).resolves.toEqual([
       {
-        connected: false,
+        connected: true,
         enabled: true,
         id: "local-mcp-1",
-        lastError: "Local MCP tool discovery is not implemented yet.",
         name: "Local MCP",
-        toolCount: 0,
+        toolCount: 1,
       },
     ])
+  })
+
+  it("lists and calls tools from enabled local MCP services", async () => {
+    const bridge = createDesktopLocalAIBridge()
+
+    await expect(bridge.listTools()).resolves.toEqual([
+      {
+        description: "Search docs",
+        id: "local-mcp-1:search",
+        inputSchema: { type: "object" },
+        name: "search",
+        serverId: "local-mcp-1",
+      },
+    ])
+    await expect(
+      bridge.callTool({
+        arguments: { q: "folo" },
+        serverId: "local-mcp-1",
+        toolId: "local-mcp-1:search",
+      }),
+    ).resolves.toEqual({ content: [{ text: "tool result", type: "text" }] })
+    expect(mocks.callMCPTool).toHaveBeenCalledWith({
+      arguments: { q: "folo" },
+      headers: {},
+      name: "search",
+      transportType: "streamable-http",
+      url: "https://example.com/mcp",
+    })
   })
 })
 

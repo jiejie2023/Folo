@@ -213,20 +213,51 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     }))
   },
   async listTools() {
-    return []
+    const services = getAISettings().mcpServices.filter(
+      (service) => service.enabled && Boolean(service.url),
+    )
+    const ipc = requireLocalAIIPC()
+    const toolGroups = await Promise.all(
+      services.map(async (service) => {
+        const tools = await ipc.listMCPTools(toDesktopMCPConnection(service))
+        return tools.map((tool) => ({
+          description: tool.description,
+          id: `${service.id}:${tool.name}`,
+          inputSchema: tool.inputSchema,
+          name: tool.name,
+          serverId: service.id,
+        }))
+      }),
+    )
+    return toolGroups.flat()
   },
-  async callTool() {
-    return {
-      content: [
-        {
-          text: "Local MCP tool execution is not implemented yet.",
-          type: "text",
-        },
-      ],
-      isError: true,
-    } satisfies LocalAIToolCallResult
+  async callTool(input) {
+    const settings = getAISettings()
+    const serverId = input.serverId ?? input.toolId.split(":", 1)[0]
+    const service = settings.mcpServices.find((item) => item.id === serverId && item.enabled)
+    if (!service) throw new Error("Local MCP service not found or disabled")
+    const prefix = `${service.id}:`
+    const toolName = input.toolId.startsWith(prefix)
+      ? input.toolId.slice(prefix.length)
+      : input.toolId
+    return requireLocalAIIPC().callMCPTool({
+      ...toDesktopMCPConnection(service),
+      arguments: input.arguments ?? {},
+      name: toolName,
+    }) satisfies Promise<LocalAIToolCallResult>
   },
 })
+
+const toDesktopMCPConnection = (
+  service: ReturnType<typeof getAISettings>["mcpServices"][number],
+) => {
+  if (!service.url) throw new Error(`MCP service ${service.name} has no endpoint URL`)
+  return {
+    headers: service.headers ?? {},
+    transportType: service.transportType,
+    url: service.url,
+  }
+}
 
 const listDesktopProfiles = async (): Promise<DesktopLocalAIProfile[]> =>
   requireLocalAIIPC().listProfiles()

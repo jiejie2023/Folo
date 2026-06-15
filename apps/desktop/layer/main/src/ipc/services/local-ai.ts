@@ -4,6 +4,9 @@ import type { LocalAIFeature } from "@follow/shared/settings/interface"
 import type { IpcContext } from "electron-ipc-decorator"
 import { IpcMethod, IpcService } from "electron-ipc-decorator"
 
+import type { LocalMCPConnectionInput, LocalMCPToolCallResult } from "~/lib/local-ai/mcp-client"
+import { callLocalMCPTool, listLocalMCPTools } from "~/lib/local-ai/mcp-client"
+import type { LocalAIChatTool, LocalAIToolCall } from "~/lib/local-ai/openai-compatible"
 import {
   completeOpenAICompatibleText,
   listOpenAICompatibleModels,
@@ -42,10 +45,25 @@ type LocalAICompleteTextInput = {
 type LocalAIChatStreamInput = {
   feature?: LocalAIFeature
   maxTokens?: number
+  mcpServers?: LocalAIMCPServerInput[]
   messages: LocalAIChatMessage[]
   model: string
   profileId: string
   temperature?: number
+}
+
+type LocalAIMCPServerInput = {
+  enabled: boolean
+  headers?: Record<string, string>
+  id: string
+  name: string
+  transportType: LocalMCPConnectionInput["transportType"]
+  url?: string
+}
+
+type LocalMCPToolCallIPCInput = LocalMCPConnectionInput & {
+  arguments: Record<string, unknown>
+  name: string
 }
 
 type LocalAISpeechInput = {
@@ -264,6 +282,22 @@ export class LocalAIService extends IpcService {
   }
 
   @IpcMethod()
+  listMCPTools(
+    _context: IpcContext,
+    input: LocalMCPConnectionInput,
+  ): ReturnType<typeof listLocalMCPTools> {
+    return listLocalMCPTools(input)
+  }
+
+  @IpcMethod()
+  callMCPTool(
+    _context: IpcContext,
+    input: LocalMCPToolCallIPCInput,
+  ): ReturnType<typeof callLocalMCPTool> {
+    return callLocalMCPTool(input)
+  }
+
+  @IpcMethod()
   async synthesizeSpeech(
     _context: IpcContext,
     input: LocalAISpeechInput,
@@ -332,6 +366,10 @@ export class LocalAIService extends IpcService {
     try {
       const resolved = resolveProfile(input.profileId)
       apiKey = resolved.apiKey
+      const mcpRuntime =
+        resolved.profile.supportsTools && input.mcpServers?.some((server) => server.enabled)
+          ? await createMCPToolRuntime(input.mcpServers)
+          : null
 
       const result = await streamOpenAICompatibleChat({
         abortSignal,
@@ -339,6 +377,12 @@ export class LocalAIService extends IpcService {
         maxTokens: input.maxTokens,
         messages: input.messages,
         model: input.model,
+        ...(mcpRuntime
+          ? {
+              callTool: mcpRuntime.callTool,
+              tools: mcpRuntime.tools,
+            }
+          : {}),
         onDelta: (delta) => {
           context.sender.send("local-ai:chat-delta", { delta, streamId })
         },
@@ -369,6 +413,101 @@ export class LocalAIService extends IpcService {
       this.chatStreamControllers.delete(streamId)
     }
   }
+}
+
+const createMCPToolRuntime = async (
+  servers: LocalAIMCPServerInput[],
+): Promise<{
+  callTool: (toolCall: LocalAIToolCall) => Promise<string>
+  tools: LocalAIChatTool[]
+}> => {
+  const bindings = new Map<
+    string,
+    { server: LocalAIMCPServerInput & { url: string }; toolName: string }
+  >()
+  const tools: LocalAIChatTool[] = []
+  const errors: string[] = []
+
+  for (const server of servers) {
+    if (!server.enabled || !server.url) continue
+    try {
+      const serverTools = await listLocalMCPTools({
+        headers: server.headers ?? {},
+        transportType: server.transportType,
+        url: server.url,
+      })
+      for (const tool of serverTools) {
+        const functionName = createMCPFunctionName(server.id, tool.name, bindings)
+        bindings.set(functionName, {
+          server: { ...server, url: server.url },
+          toolName: tool.name,
+        })
+        tools.push({
+          function: {
+            ...(tool.description ? { description: tool.description } : {}),
+            name: functionName,
+            parameters: tool.inputSchema,
+          },
+          type: "function",
+        })
+      }
+    } catch (error) {
+      errors.push(`${server.name}: ${sanitizeErrorMessage(error, null)}`)
+    }
+  }
+
+  if (tools.length === 0 && errors.length > 0) {
+    throw new Error(`Unable to load MCP tools. ${errors.join("; ")}`)
+  }
+
+  return {
+    async callTool(toolCall) {
+      const binding = bindings.get(toolCall.function.name)
+      if (!binding) throw new Error(`Unknown MCP tool: ${toolCall.function.name}`)
+      const result = await callLocalMCPTool({
+        arguments: parseToolArguments(toolCall.function.arguments),
+        headers: binding.server.headers ?? {},
+        name: binding.toolName,
+        transportType: binding.server.transportType,
+        url: binding.server.url,
+      })
+      return formatMCPToolResult(result)
+    },
+    tools,
+  }
+}
+
+const createMCPFunctionName = (
+  serverId: string,
+  toolName: string,
+  bindings: ReadonlyMap<string, unknown>,
+): string => {
+  const base = `mcp_${serverId}_${toolName}`.replaceAll(/\W/g, "_").slice(0, 60)
+  let candidate = base
+  let suffix = 2
+  while (bindings.has(candidate)) {
+    candidate = `${base.slice(0, 60 - String(suffix).length)}_${suffix}`
+    suffix += 1
+  }
+  return candidate
+}
+
+const parseToolArguments = (value: string): Record<string, unknown> => {
+  try {
+    const parsed = JSON.parse(value) as unknown
+    if (isRecord(parsed)) return parsed
+  } catch {
+    // Handled by the common error below.
+  }
+  throw new Error("MCP tool arguments must be a JSON object")
+}
+
+const formatMCPToolResult = (result: LocalMCPToolCallResult): string => {
+  const content = result.content
+    .map((item) => (item.type === "text" ? item.text : JSON.stringify(item.value)))
+    .filter(Boolean)
+    .join("\n")
+  return result.isError ? `MCP tool reported an error:\n${content}` : content
 }
 
 const resolveProfile = (profileId: string): ResolvedProfile => {
@@ -436,3 +575,6 @@ const sanitizeErrorMessage = (error: unknown, apiKey: string | null): string => 
   const message = error instanceof Error ? error.message : String(error)
   return apiKey ? message.replaceAll(apiKey, "[redacted]") : message
 }
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null

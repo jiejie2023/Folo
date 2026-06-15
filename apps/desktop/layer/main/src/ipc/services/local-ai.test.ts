@@ -13,6 +13,8 @@ const {
   clearLocalAIUsage,
   completeOpenAICompatibleText,
   deleteLocalAIProfile,
+  callLocalMCPTool,
+  listLocalMCPTools,
   listLocalAIProfiles,
   listLocalAIUsage,
   listOpenAICompatibleModels,
@@ -25,9 +27,11 @@ const {
   upsertLocalAIProfile,
 } = vi.hoisted(() => ({
   clearLocalAIUsage: vi.fn(),
+  callLocalMCPTool: vi.fn(),
   completeOpenAICompatibleText: vi.fn(),
   deleteLocalAIProfile: vi.fn(),
   listLocalAIProfiles: vi.fn(),
+  listLocalMCPTools: vi.fn(),
   listLocalAIUsage: vi.fn(),
   listOpenAICompatibleModels: vi.fn(),
   readLocalAIProfileSecret: vi.fn(),
@@ -65,6 +69,11 @@ vi.mock("~/lib/local-ai/openai-compatible", () => ({
   listOpenAICompatibleModels,
   streamOpenAICompatibleChat,
   synthesizeOpenAICompatibleSpeech,
+}))
+
+vi.mock("~/lib/local-ai/mcp-client", () => ({
+  callLocalMCPTool,
+  listLocalMCPTools,
 }))
 
 vi.mock("~/lib/local-ai/usage-store", () => ({
@@ -382,6 +391,105 @@ describe("LocalAIService", () => {
       ok: true,
       profileId: "profile-1",
       totalTokens: 10,
+    })
+  })
+
+  it("lists and calls local MCP tools through IPC", async () => {
+    listLocalMCPTools.mockResolvedValue([
+      { description: "Search docs", inputSchema: { type: "object" }, name: "search" },
+    ])
+    callLocalMCPTool.mockResolvedValue({
+      content: [{ text: "result", type: "text" }],
+    })
+    const service = new LocalAIService()
+    const connection = {
+      headers: { Authorization: "Bearer token" },
+      transportType: "streamable-http" as const,
+      url: "https://mcp.example.com/api",
+    }
+
+    await expect(service.listMCPTools(context, connection)).resolves.toEqual([
+      { description: "Search docs", inputSchema: { type: "object" }, name: "search" },
+    ])
+    await expect(
+      service.callMCPTool(context, { ...connection, arguments: { q: "folo" }, name: "search" }),
+    ).resolves.toEqual({ content: [{ text: "result", type: "text" }] })
+    expect(listLocalMCPTools).toHaveBeenCalledWith(connection)
+    expect(callLocalMCPTool).toHaveBeenCalledWith({
+      ...connection,
+      arguments: { q: "folo" },
+      name: "search",
+    })
+  })
+
+  it("discovers enabled MCP tools and routes model tool calls during local chat", async () => {
+    listLocalAIProfiles.mockReturnValue([{ ...profile, supportsTools: true }])
+    listLocalMCPTools.mockResolvedValue([
+      {
+        description: "Search docs",
+        inputSchema: { properties: { q: { type: "string" } }, type: "object" },
+        name: "search",
+      },
+    ])
+    callLocalMCPTool.mockResolvedValue({
+      content: [{ text: "tool result", type: "text" }],
+    })
+    streamOpenAICompatibleChat.mockImplementation(
+      async ({
+        callTool,
+        onDelta,
+        tools,
+      }: {
+        callTool: (input: unknown) => Promise<string>
+        onDelta: (delta: string) => void
+        tools: unknown[]
+      }) => {
+        expect(tools).toEqual([
+          {
+            function: {
+              description: "Search docs",
+              name: "mcp_local_mcp_1_search",
+              parameters: { properties: { q: { type: "string" } }, type: "object" },
+            },
+            type: "function",
+          },
+        ])
+        await expect(
+          callTool({
+            function: { arguments: '{"q":"folo"}', name: "mcp_local_mcp_1_search" },
+            id: "call-1",
+            type: "function",
+          }),
+        ).resolves.toBe("tool result")
+        onDelta("done")
+        return { text: "done", totalTokens: 12 }
+      },
+    )
+    const service = new LocalAIService()
+
+    service.startChatStream(context, {
+      mcpServers: [
+        {
+          enabled: true,
+          headers: {},
+          id: "local-mcp-1",
+          name: "Local MCP",
+          transportType: "streamable-http",
+          url: "https://mcp.example.com/api",
+        },
+      ],
+      messages: [{ content: "Search Folo", role: "user" }],
+      model: "llama3",
+      profileId: "profile-1",
+    })
+    await flushPromises()
+
+    expect(callLocalMCPTool).toHaveBeenCalledWith({
+      arguments: { q: "folo" },
+      headers: {},
+      name: "search",
+      transportType: "streamable-http",
+      url: "https://mcp.example.com/api",
     })
   })
 

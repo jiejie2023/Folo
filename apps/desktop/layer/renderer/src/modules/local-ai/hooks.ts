@@ -81,6 +81,29 @@ export type DesktopLocalAISpeechResult = {
   mimeType: string
 }
 
+export type DesktopLocalMCPConnection = {
+  headers: Record<string, string>
+  transportType: "sse" | "streamable-http"
+  url: string
+}
+
+export type DesktopLocalMCPTool = {
+  description?: string
+  inputSchema: Record<string, unknown>
+  name: string
+}
+
+export type DesktopLocalMCPToolCallResult = {
+  content: Array<
+    | { text: string; type: "text" }
+    | {
+        type: "json"
+        value: unknown
+      }
+  >
+  isError?: boolean
+}
+
 export type DesktopLocalAIProfileTestResult = {
   message: string
   model: string
@@ -107,15 +130,30 @@ export type DesktopLocalAICompleteTextInput = {
 }
 
 export type DesktopLocalAIIPC = {
+  callMCPTool: (
+    input: DesktopLocalMCPConnection & {
+      arguments: Record<string, unknown>
+      name: string
+    },
+  ) => Promise<DesktopLocalMCPToolCallResult>
   clearUsage: () => Promise<void>
   completeText: (input: DesktopLocalAICompleteTextInput) => Promise<DesktopLocalAITextResult>
   deleteProfile: (profileId: string) => Promise<void>
   listModels: (profileId: string) => Promise<string[]>
+  listMCPTools: (input: DesktopLocalMCPConnection) => Promise<DesktopLocalMCPTool[]>
   listProfiles: () => Promise<DesktopLocalAIProfile[]>
   listUsage: (limit?: number) => Promise<DesktopLocalAIUsageRecord[]>
   startChatStream: (input: {
     feature?: LocalAIFeature
     maxTokens?: number
+    mcpServers?: Array<{
+      enabled: boolean
+      headers?: Record<string, string>
+      id: string
+      name: string
+      transportType: DesktopLocalMCPConnection["transportType"]
+      url?: string
+    }>
     messages: DesktopLocalAICompleteTextInput["messages"]
     model: string
     profileId: string

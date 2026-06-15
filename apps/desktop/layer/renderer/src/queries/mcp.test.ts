@@ -1,5 +1,5 @@
-import type { AISettings, MCPService } from "@follow/shared/settings/interface"
 import { defaultAISettings } from "@follow/shared/settings/defaults"
+import type { AISettings, MCPService } from "@follow/shared/settings/interface"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import {
@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   getAISettings: vi.fn(),
   getConnections: vi.fn(),
   getLocalAIProfileId: vi.fn(),
+  getLocalAIIPC: vi.fn(),
   getTools: vi.fn(),
   refreshTools: vi.fn(),
   setAISetting: vi.fn(),
@@ -42,6 +43,7 @@ vi.mock("~/atoms/settings/ai", () => ({
 }))
 
 vi.mock("~/modules/local-ai/hooks", () => ({
+  getLocalAIIPC: mocks.getLocalAIIPC,
   getLocalAIProfileId: mocks.getLocalAIProfileId,
 }))
 
@@ -78,6 +80,13 @@ describe("local MCP queries", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.getLocalAIProfileId.mockReturnValue("profile-1")
+    mocks.getLocalAIIPC.mockReturnValue({
+      listMCPTools: vi
+        .fn()
+        .mockResolvedValue([
+          { description: "Search docs", inputSchema: { type: "object" }, name: "search" },
+        ]),
+    })
     mocks.getAISettings.mockReturnValue(createSettings({ mcpServices: [existingService] }))
   })
 
@@ -117,11 +126,36 @@ describe("local MCP queries", () => {
     expect(mocks.setAISetting).toHaveBeenLastCalledWith("mcpServices", [])
   })
 
-  it("keeps local MCP refresh and tools local", async () => {
+  it("discovers local MCP tools and stores the connection status", async () => {
     await refreshMCPTools(["local-mcp-1"])
-    await expect(getMCPTools("local-mcp-1")).resolves.toEqual([])
+    await expect(getMCPTools("local-mcp-1")).resolves.toEqual([
+      { description: "Search docs", inputSchema: { type: "object" }, name: "search" },
+    ])
 
     expect(mocks.refreshTools).not.toHaveBeenCalled()
     expect(mocks.getTools).not.toHaveBeenCalled()
+    expect(mocks.setAISetting).toHaveBeenCalledWith("mcpServices", [
+      expect.objectContaining({
+        id: "local-mcp-1",
+        isConnected: true,
+        lastError: undefined,
+        toolCount: 1,
+      }),
+    ])
+  })
+
+  it("stores local MCP discovery failures and rejects the refresh", async () => {
+    const localAIIPC = mocks.getLocalAIIPC()
+    localAIIPC.listMCPTools.mockRejectedValue(new Error("connection refused"))
+
+    await expect(refreshMCPTools(["local-mcp-1"])).rejects.toThrow("connection refused")
+    expect(mocks.setAISetting).toHaveBeenCalledWith("mcpServices", [
+      expect.objectContaining({
+        id: "local-mcp-1",
+        isConnected: false,
+        lastError: "connection refused",
+        toolCount: 0,
+      }),
+    ])
   })
 })
