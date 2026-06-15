@@ -22,6 +22,7 @@ import { useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { useGeneralSettingKey } from "~/atoms/settings/general"
+import { useAISettingKey } from "~/atoms/settings/ai"
 import { ROUTE_FEED_PENDING } from "~/constants/app"
 import { useFeature } from "~/hooks/biz/useFeature"
 import { useRouteParams } from "~/hooks/biz/useRouteParams"
@@ -40,6 +41,7 @@ const useRemoteEntries = (): UseEntriesReturn => {
   )
   const aiTimelineEnabled = useAtomValue(aiTimelineEnabledAtom)
   const aiEnabled = useFeature("ai")
+  const aiTimelinePrompt = useAISettingKey("aiTimelinePrompt")
 
   const folderIds = useFolderFeedsByFeedId({
     feedId,
@@ -58,6 +60,7 @@ const useRemoteEntries = (): UseEntriesReturn => {
       }),
       ...(view === FeedViewType.All && { limit: 40 }),
       ...(aiTimelineEnabled && aiEnabled && { aiSort: true }),
+      ...(aiTimelineEnabled && aiEnabled && { aiTimelinePrompt }),
     }
 
     if (feedId && listId && isBizId(feedId)) {
@@ -76,6 +79,7 @@ const useRemoteEntries = (): UseEntriesReturn => {
     hidePrivateSubscriptionsInTimeline,
     aiTimelineEnabled,
     aiEnabled,
+    aiTimelinePrompt,
   ])
   const query = useEntriesQuery(entriesOptions)
 

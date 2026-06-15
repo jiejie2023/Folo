@@ -149,6 +149,7 @@ const LOCAL_AI_RUNTIME_FEATURES = new Set<LocalAIFeature>([
   "chat",
   "summary",
   "translation",
+  "timelineRanking",
   "timelineSummary",
   "tts",
 ])

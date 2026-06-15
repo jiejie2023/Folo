@@ -1,10 +1,12 @@
 import { FeedViewType } from "@follow/constants"
+import type { LocalAIFeature } from "@follow/shared/settings/interface"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-import { apiContext } from "../../context"
+import { apiContext, localAIContext } from "../../context"
 import type { FollowAPI } from "../../types"
 import { useCollectionStore } from "../collection/store"
 import { useFeedStore } from "../feed/store"
+import type { LocalAIBridge } from "../local-ai/types"
 import { entrySyncServices, useEntryStore } from "./store"
 
 const {
@@ -84,6 +86,7 @@ const createCollectionResponseItem = (index: number) => ({
 
 describe("entrySyncServices.fetchEntries", () => {
   const listEntriesMock = vi.fn()
+  const localAIRunTaskMock = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
@@ -117,6 +120,7 @@ describe("entrySyncServices.fetchEntries", () => {
         list: listEntriesMock,
       },
     } as unknown as FollowAPI)
+    localAIContext.provide()
   })
 
   it("keeps known collection entries when the first collection page can have more pages", async () => {
@@ -148,5 +152,66 @@ describe("entrySyncServices.fetchEntries", () => {
 
     expect(Object.keys(useCollectionStore.getState().collections)).toHaveLength(25)
     expect(useCollectionStore.getState().collections["entry-1"]).toBeDefined()
+  })
+
+  it("uses local AI to rank timeline entries when timeline ranking is routed locally", async () => {
+    listEntriesMock.mockResolvedValue({
+      data: [createCollectionResponseItem(1), createCollectionResponseItem(2)],
+    })
+    localAIRunTaskMock.mockResolvedValue({
+      output: JSON.stringify(["entry-2", "entry-1"]),
+    })
+    const localAIBridgeMock: LocalAIBridge = {
+      callTool: async () => ({ content: [] }),
+      createChatCompletion: async () => {
+        throw new Error("not implemented")
+      },
+      deleteProfile: async () => {},
+      isFeatureEnabled: (feature: LocalAIFeature) => feature === "timelineRanking",
+      listMCPServers: async () => [],
+      listModels: async () => [],
+      listProfiles: async () => [],
+      listTools: async () => [],
+      runTask: localAIRunTaskMock,
+      saveProfile: async () => {
+        throw new Error("not implemented")
+      },
+      summarizeEntry: async () => null,
+      synthesizeSpeech: async () => {
+        throw new Error("not implemented")
+      },
+      testProfile: async () => ({ ok: true }),
+      translateEntries: async () => ({}),
+    }
+    localAIContext.provide(localAIBridgeMock)
+
+    const response = await entrySyncServices.fetchEntries({
+      aiSort: true,
+      aiTimelinePrompt: "Prioritize AI research.",
+      feedId: "collections",
+      limit: 100,
+      view: FeedViewType.Articles,
+    })
+
+    expect(listEntriesMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        limit: 100,
+      }),
+      undefined,
+    )
+    expect(listEntriesMock.mock.calls[0]?.[0]).not.toHaveProperty("aiSort")
+    expect(localAIRunTaskMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        context: expect.objectContaining({
+          entries: [
+            expect.objectContaining({ id: "entry-1", title: "Entry 1" }),
+            expect.objectContaining({ id: "entry-2", title: "Entry 2" }),
+          ],
+          prompt: "Prioritize AI research.",
+        }),
+        feature: "timelineRanking",
+      }),
+    )
+    expect(response.data.map((item) => item.entries.id)).toEqual(["entry-2", "entry-1"])
   })
 })

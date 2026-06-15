@@ -35,12 +35,24 @@ describe("resolveLocalAIProfileId", () => {
     const settings = createSettings({
       featureRouting: {
         ...createSettings().featureRouting,
+        tasks: "local",
+      },
+    })
+
+    expect(resolveLocalAIMode(settings, "tasks")).toBe("cloud")
+    expect(resolveLocalAIProfileId(settings, "tasks")).toBeNull()
+  })
+
+  test("allows timeline ranking to route to local AI", () => {
+    const settings = createSettings({
+      featureRouting: {
+        ...createSettings().featureRouting,
         timelineRanking: "local",
       },
     })
 
-    expect(resolveLocalAIMode(settings, "timelineRanking")).toBe("cloud")
-    expect(resolveLocalAIProfileId(settings, "timelineRanking")).toBeNull()
+    expect(resolveLocalAIMode(settings, "timelineRanking")).toBe("local")
+    expect(resolveLocalAIProfileId(settings, "timelineRanking")).toBe("profile-1")
   })
 
   test("returns the default profile id when local AI is enabled and the feature routes locally", () => {

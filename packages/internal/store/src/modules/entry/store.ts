@@ -4,7 +4,7 @@ import { isBizId } from "@follow/utils"
 import { cloneDeep } from "es-toolkit"
 import { debounce } from "es-toolkit/compat"
 
-import { api } from "../../context"
+import { api, localAI } from "../../context"
 import type { Hydratable, Resetable } from "../../lib/base"
 import { createImmerSetter, createTransaction, createZustandStore } from "../../lib/helper"
 import { readNdjsonStream } from "../../lib/stream"
@@ -14,6 +14,7 @@ import { storeDbMorph } from "../../morph/store-db"
 import { collectionActions } from "../collection/store"
 import { clearAllFeedUnreadDirty, clearFeedUnreadDirty } from "../feed/hooks"
 import { feedActions } from "../feed/store"
+import type { LocalAIBridge } from "../local-ai/types"
 import { getSubscriptionById } from "../subscription/getter"
 import { getDefaultCategory } from "../subscription/utils"
 import type {
@@ -31,6 +32,20 @@ type FeedId = string
 type InboxId = string
 type Category = string
 type ListId = string
+type EntryListResponseItem = {
+  entries: {
+    author?: string | null
+    description?: string | null
+    id: string
+    publishedAt?: Date | string | null
+    title?: string | null
+    url?: string | null
+  }
+  feeds: {
+    id: string
+    title?: string | null
+  }
+}
 
 interface EntryState {
   data: Record<EntryId, EntryModel>
@@ -61,6 +76,9 @@ const defaultState: EntryState = {
 }
 
 const LOCAL_READ_PROTECTION_WINDOW = 30 * 1000
+
+const DEFAULT_LOCAL_TIMELINE_RANKING_PROMPT =
+  "Prioritize entries that are useful, timely, information-dense, and likely worth reading first."
 
 export const useEntryStore = createZustandStore<EntryState>("entry")(() => defaultState)
 
@@ -521,6 +539,122 @@ class EntryActions implements Hydratable, Resetable {
   }
 }
 
+const rankTimelineEntriesWithLocalAI = async <T extends EntryListResponseItem>({
+  data,
+  localAIBridge,
+  prompt,
+}: {
+  data: T[]
+  localAIBridge: LocalAIBridge
+  prompt?: string
+}): Promise<T[]> => {
+  if (data.length <= 1) return data
+
+  try {
+    const rankingPrompt = createLocalTimelineRankingPrompt(prompt, data)
+    const result = await localAIBridge.runTask({
+      context: {
+        entries: data.map(toTimelineRankingEntry),
+        prompt: prompt?.trim() || DEFAULT_LOCAL_TIMELINE_RANKING_PROMPT,
+      },
+      feature: "timelineRanking",
+      prompt: rankingPrompt,
+    })
+    const rankedIds = parseTimelineRankingIds(
+      result.output,
+      new Set(data.map((item) => item.entries.id)),
+    )
+    if (rankedIds.length === 0) return data
+
+    return reorderEntryResponseItems(data, rankedIds)
+  } catch (error) {
+    console.error("Local timeline ranking failed:", error)
+    return data
+  }
+}
+
+const createLocalTimelineRankingPrompt = (
+  userPrompt: string | undefined,
+  data: EntryListResponseItem[],
+): string => {
+  const preference = userPrompt?.trim() || DEFAULT_LOCAL_TIMELINE_RANKING_PROMPT
+  return [
+    "Rank these RSS timeline entries for the current reader.",
+    "Return only a JSON array of entry ids in the preferred reading order.",
+    "Do not include markdown, explanations, scores, or ids that are not present.",
+    `Reader preference: ${preference}`,
+    `Entries: ${JSON.stringify(data.map(toTimelineRankingEntry))}`,
+  ].join("\n\n")
+}
+
+const toTimelineRankingEntry = (item: EntryListResponseItem) => ({
+  author: item.entries.author ?? null,
+  description: item.entries.description ?? null,
+  feedId: item.feeds.id,
+  feedTitle: item.feeds.title ?? null,
+  id: item.entries.id,
+  publishedAt:
+    item.entries.publishedAt instanceof Date
+      ? item.entries.publishedAt.toISOString()
+      : (item.entries.publishedAt ?? null),
+  title: item.entries.title ?? null,
+  url: item.entries.url ?? null,
+})
+
+const parseTimelineRankingIds = (output: string, validIds: Set<string>): string[] => {
+  const parsed = parseTimelineRankingOutput(output)
+  const ids = Array.isArray(parsed)
+    ? parsed
+    : isRecord(parsed) && Array.isArray(parsed.ids)
+      ? parsed.ids
+      : isRecord(parsed) && Array.isArray(parsed.rankedIds)
+        ? parsed.rankedIds
+        : []
+
+  const seen = new Set<string>()
+  return ids.filter((id): id is string => {
+    if (typeof id !== "string") return false
+    if (!validIds.has(id) || seen.has(id)) return false
+    seen.add(id)
+    return true
+  })
+}
+
+const parseTimelineRankingOutput = (output: string): unknown => {
+  const trimmed = output.trim()
+  const startIndex = Math.min(
+    ...[trimmed.indexOf("["), trimmed.indexOf("{")].filter((index) => index >= 0),
+  )
+  if (!Number.isFinite(startIndex)) return []
+
+  const opener = trimmed[startIndex]
+  const closer = opener === "[" ? "]" : "}"
+  const endIndex = trimmed.lastIndexOf(closer)
+  if (endIndex <= startIndex) return []
+
+  try {
+    return JSON.parse(trimmed.slice(startIndex, endIndex + 1))
+  } catch {
+    return []
+  }
+}
+
+const reorderEntryResponseItems = <T extends EntryListResponseItem>(
+  data: T[],
+  rankedIds: string[],
+): T[] => {
+  const itemById = new Map(data.map((item) => [item.entries.id, item]))
+  const rankedItems = rankedIds.flatMap((id) => {
+    const item = itemById.get(id)
+    return item ? [item] : []
+  })
+  const rankedIdSet = new Set(rankedIds)
+  return [...rankedItems, ...data.filter((item) => !rankedIdSet.has(item.entries.id))]
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
 class EntrySyncServices {
   async fetchEntries(props: FetchEntriesProps) {
     const {
@@ -535,6 +669,7 @@ class EntrySyncServices {
       feedIdList,
       excludePrivate,
       aiSort,
+      aiTimelinePrompt,
     } = props
     const params = getEntriesParams({
       feedId,
@@ -544,32 +679,66 @@ class EntrySyncServices {
       feedIdList,
     })
 
-    const res = params.inboxId
-      ? await api().entries.inbox.list({
-          publishedAfter: pageParam,
-          read,
-          limit,
-          isCollection,
-          inboxId: params.inboxId,
-          ...(aiSort && { aiSort }),
-          ...params,
-        })
-      : await api().entries.list(
-          {
+    const localAIBridge = aiSort ? localAI() : undefined
+    const shouldRankWithLocalAI =
+      aiSort === true && localAIBridge?.isFeatureEnabled("timelineRanking") === true
+    const shouldRankWithCloudAI = aiSort === true && !shouldRankWithLocalAI
+
+    const rankWithLocalAI = async <T extends EntryListResponseItem>(
+      data: T[],
+      bridge: LocalAIBridge,
+    ) =>
+      rankTimelineEntriesWithLocalAI({
+        data,
+        localAIBridge: bridge,
+        prompt: aiTimelinePrompt,
+      })
+
+    const resolvedInboxId = params.inboxId
+    const res = resolvedInboxId
+      ? await (async () => {
+          const inboxRes = await api().entries.inbox.list({
             publishedAfter: pageParam,
             read,
             limit,
             isCollection,
-            excludePrivate,
-            ...(aiSort && { aiSort }),
+            ...(shouldRankWithCloudAI && { aiSort }),
             ...params,
-          },
-          aiSort
+            inboxId: resolvedInboxId,
+          })
+
+          return shouldRankWithLocalAI && localAIBridge && Array.isArray(inboxRes.data)
             ? {
-                timeout: 3 * 60 * 1000,
+                ...inboxRes,
+                data: await rankWithLocalAI(inboxRes.data, localAIBridge),
               }
-            : undefined,
-        )
+            : inboxRes
+        })()
+      : await (async () => {
+          const listRes = await api().entries.list(
+            {
+              publishedAfter: pageParam,
+              read,
+              limit,
+              isCollection,
+              excludePrivate,
+              ...(shouldRankWithCloudAI && { aiSort }),
+              ...params,
+            },
+            shouldRankWithCloudAI
+              ? {
+                  timeout: 3 * 60 * 1000,
+                }
+              : undefined,
+          )
+
+          return shouldRankWithLocalAI && localAIBridge && Array.isArray(listRes.data)
+            ? {
+                ...listRes,
+                data: await rankWithLocalAI(listRes.data, localAIBridge),
+              }
+            : listRes
+        })()
 
     // Mark feed unread dirty, so re-fetch the unread data when view feed unread entires in the next time
     if (read === false) {
