@@ -91,7 +91,6 @@ describe("entry tts", () => {
       voice: "en-US-AvaMultilingualNeural",
     })
     getReadabilityStatusMock.mockReturnValue({})
-    localAIMock.mockReturnValue()
     fetchMock.mockResolvedValue(
       new Response(new Blob(["audio"], { type: "audio/mpeg" }), {
         headers: {
