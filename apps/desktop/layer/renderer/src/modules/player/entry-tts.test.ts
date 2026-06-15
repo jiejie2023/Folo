@@ -8,6 +8,7 @@ const {
   getGeneralSettingsMock,
   getReadabilityStatusMock,
   legacyTtsMock,
+  localAIMock,
   mountMock,
   toastFetchErrorMock,
 } = vi.hoisted(() => ({
@@ -15,12 +16,17 @@ const {
   getGeneralSettingsMock: vi.fn(),
   getReadabilityStatusMock: vi.fn(),
   legacyTtsMock: vi.fn(),
+  localAIMock: vi.fn(),
   mountMock: vi.fn(),
   toastFetchErrorMock: vi.fn(),
 }))
 
 vi.mock("@follow/store/entry/getter", () => ({
   getEntry: getEntryMock,
+}))
+
+vi.mock("@follow/store/context", () => ({
+  localAI: localAIMock,
 }))
 
 vi.mock("~/atoms/readability", () => ({
@@ -85,6 +91,7 @@ describe("entry tts", () => {
       voice: "en-US-AvaMultilingualNeural",
     })
     getReadabilityStatusMock.mockReturnValue({})
+    localAIMock.mockReturnValue()
     fetchMock.mockResolvedValue(
       new Response(new Blob(["audio"], { type: "audio/mpeg" }), {
         headers: {
@@ -124,6 +131,32 @@ describe("entry tts", () => {
     })
 
     expect(legacyTtsMock).not.toHaveBeenCalled()
+    expect(mountMock).toHaveBeenCalledWith({
+      currentTime: 0,
+      entryId: "entry-1",
+      src: "blob:tts-audio",
+      type: "audio",
+    })
+  })
+
+  it("requests entry tts from local AI when TTS is routed locally", async () => {
+    const synthesizeSpeech = vi.fn().mockResolvedValue({
+      audioBase64: Buffer.from("audio").toString("base64"),
+      mimeType: "audio/mpeg",
+    })
+    localAIMock.mockReturnValue({
+      isFeatureEnabled: vi.fn((feature) => feature === "tts"),
+      synthesizeSpeech,
+    })
+
+    await playEntryTts("entry-1", { toastTitle: "Play TTS" })
+
+    expect(fetchMock).not.toHaveBeenCalled()
+    expect(synthesizeSpeech).toHaveBeenCalledWith({
+      format: "mp3",
+      text: "Hello world",
+      voice: "en-US-AvaMultilingualNeural",
+    })
     expect(mountMock).toHaveBeenCalledWith({
       currentTime: 0,
       entryId: "entry-1",

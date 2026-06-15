@@ -1,3 +1,4 @@
+import { localAI } from "@follow/store/context"
 import type { EntryModel } from "@follow/store/entry/types"
 import { parseHtml } from "@follow/utils/html"
 
@@ -56,6 +57,12 @@ const readTtsErrorMessage = async (response: Response) => {
   }
 }
 
+const throwIfAborted = (signal?: AbortSignal) => {
+  if (signal?.aborted) {
+    throw new DOMException("Aborted", "AbortError")
+  }
+}
+
 export const fetchTtsVoices = async (signal?: AbortSignal) => {
   const response = await fetch(`${TTS_SERVICE_URL}/voices`, { signal })
 
@@ -82,6 +89,24 @@ export const requestTts = async ({
   }
 
   const normalizedVoice = voice?.trim()
+  const localAIBridge = localAI()
+  if (localAIBridge?.isFeatureEnabled("tts")) {
+    throwIfAborted(signal)
+    const result = await localAIBridge.synthesizeSpeech({
+      format: "mp3",
+      text: normalizedText,
+      voice: normalizedVoice,
+    })
+    throwIfAborted(signal)
+
+    const audioBytes = base64ToBytes(result.audioBase64)
+    const audioBody = audioBytes.buffer.slice(0) as ArrayBuffer
+    return new Response(audioBody, {
+      headers: {
+        "content-type": result.mimeType,
+      },
+    })
+  }
 
   const response = await fetch(`${TTS_SERVICE_URL}/tts`, {
     method: "POST",
@@ -100,4 +125,13 @@ export const requestTts = async ({
   }
 
   return response
+}
+
+const base64ToBytes = (base64: string): Uint8Array => {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.codePointAt(index) ?? 0
+  }
+  return bytes
 }
