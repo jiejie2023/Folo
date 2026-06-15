@@ -157,6 +157,26 @@ describe("OpenAI-compatible local AI client", () => {
     })
   })
 
+  it("passes abort signals to non-streaming requests", async () => {
+    const controller = new AbortController()
+    const { calls, fetchFn } = createFetch(
+      Response.json({
+        choices: [{ message: { content: "Done" } }],
+      }),
+    )
+
+    await completeOpenAICompatibleText({
+      abortSignal: controller.signal,
+      apiKey: "sk-secret",
+      fetchFn,
+      messages,
+      model: "gpt-4o-mini",
+      profile: createProfile(),
+    })
+
+    expect(calls[0]?.init?.signal).toBe(controller.signal)
+  })
+
   it("streams SSE chat deltas split across chunks and returns accumulated text and usage", async () => {
     const deltas: string[] = []
     const response = new Response(
@@ -186,6 +206,26 @@ describe("OpenAI-compatible local AI client", () => {
       model: "gpt-4o-mini",
       stream: true,
     })
+  })
+
+  it("passes abort signals to streaming requests", async () => {
+    const controller = new AbortController()
+    const response = new Response(createSSEStream(["data: [DONE]\n\n"]), {
+      headers: { "Content-Type": "text/event-stream" },
+    })
+    const { calls, fetchFn } = createFetch(response)
+
+    await streamOpenAICompatibleChat({
+      abortSignal: controller.signal,
+      apiKey: "sk-secret",
+      fetchFn,
+      messages,
+      model: "gpt-4o-mini",
+      onDelta: vi.fn(),
+      profile: createProfile(),
+    })
+
+    expect(calls[0]?.init?.signal).toBe(controller.signal)
   })
 
   it("rejects truncated SSE data at EOF", async () => {

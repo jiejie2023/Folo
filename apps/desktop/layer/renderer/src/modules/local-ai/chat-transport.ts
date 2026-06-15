@@ -1,0 +1,498 @@
+import { getEntry } from "@follow/store/entry/getter"
+import type { ChatTransport, UIMessageChunk } from "ai"
+
+import { getAISettings } from "~/atoms/settings/ai"
+import { getAIModelState } from "~/modules/ai-chat/atoms/session"
+import type { BizUIMessage } from "~/modules/ai-chat/store/types"
+
+import type {
+  DesktopLocalAICompleteTextInput,
+  DesktopLocalAIIPC,
+  DesktopLocalAIProfile,
+} from "./hooks"
+import {
+  assertLocalAIProfileEnabled,
+  getLocalAIIPC,
+  resolveLocalAIProfileId,
+  resolveLocalAIProfileModel,
+} from "./hooks"
+
+type LocalAIChatTransportOptions = {
+  createCloudTransport: () => ChatTransport<BizUIMessage>
+  onValue?: (value: UIMessageChunk) => void
+}
+
+type SendMessagesOptions = Parameters<ChatTransport<BizUIMessage>["sendMessages"]>[0]
+
+type LocalChatRequest = {
+  messages: DesktopLocalAICompleteTextInput["messages"]
+  model: string
+  profile: DesktopLocalAIProfile
+  profileId: string
+}
+
+type LocalAIChatDeltaPayload = {
+  delta: string
+  streamId: string
+}
+
+type LocalAIChatErrorPayload = {
+  message: string
+  streamId: string
+}
+
+type LocalAIChatFinishPayload = {
+  result?: {
+    text: string
+    totalTokens: number | null
+  }
+  streamId: string
+}
+
+const TEXT_PART_ID = "text-1"
+const MAX_CONTEXT_LENGTH = 4000
+const MAX_DESCRIPTION_LENGTH = 1000
+const DEFAULT_SYSTEM_PROMPT = "You are Folo AI, an RSS reading assistant."
+
+export const createLocalAIChatTransport = (
+  options: LocalAIChatTransportOptions,
+): ChatTransport<BizUIMessage> => new LocalAIChatTransport(options)
+
+class LocalAIChatTransport implements ChatTransport<BizUIMessage> {
+  constructor(private readonly options: LocalAIChatTransportOptions) {}
+
+  async sendMessages(options: SendMessagesOptions): Promise<ReadableStream<UIMessageChunk>> {
+    try {
+      return await this.sendLocalMessages(options)
+    } catch (error) {
+      if (error instanceof LocalAIChatSetupError && getAISettings().localAI.allowFallbackToCloud) {
+        return this.options.createCloudTransport().sendMessages(options)
+      }
+      throw error
+    }
+  }
+
+  async reconnectToStream(): Promise<ReadableStream<UIMessageChunk> | null> {
+    return null
+  }
+
+  private async sendLocalMessages({
+    abortSignal,
+    messages,
+  }: SendMessagesOptions): Promise<ReadableStream<UIMessageChunk>> {
+    const localAIIPC = getLocalAIIPC()
+    if (!localAIIPC) {
+      throw new LocalAIChatSetupError("Local AI IPC is unavailable")
+    }
+
+    const request = await createLocalChatRequest(localAIIPC, messages)
+
+    if (!request.profile.supportsStreaming) {
+      return createCompleteTextChunkStream({
+        abortSignal,
+        input: {
+          feature: "chat",
+          messages: request.messages,
+          model: request.model,
+          profileId: request.profileId,
+        },
+        localAIIPC,
+        onValue: this.options.onValue,
+      })
+    }
+
+    if (!window.electron?.ipcRenderer) {
+      throw new LocalAIChatSetupError("Local AI IPC renderer is unavailable")
+    }
+
+    const { streamId } = await startLocalChatStream(localAIIPC, {
+      messages: request.messages,
+      model: request.model,
+      profileId: request.profileId,
+    })
+
+    return createIPCChunkStream({
+      abortSignal,
+      localAIIPC,
+      onValue: this.options.onValue,
+      streamId,
+    })
+  }
+}
+
+const createLocalChatRequest = async (
+  localAIIPC: DesktopLocalAIIPC,
+  messages: BizUIMessage[],
+): Promise<LocalChatRequest> => {
+  const settings = getAISettings().localAI
+  const profileId = resolveLocalAIProfileId(settings, "chat")
+  if (!profileId) {
+    throw new LocalAIChatSetupError("Local AI profile is not configured for chat")
+  }
+
+  const profiles = await listProfilesForChat(localAIIPC)
+  const profile = profiles.find((item) => item.id === profileId)
+  if (!profile) {
+    throw new LocalAIChatSetupError("Local AI profile not found")
+  }
+  try {
+    assertLocalAIProfileEnabled(profile)
+  } catch (error) {
+    throw toSetupError(error)
+  }
+
+  let defaultModel: string
+  try {
+    defaultModel = resolveLocalAIProfileModel(profile, "chat")
+  } catch (error) {
+    throw toSetupError(error)
+  }
+  const availableModels = createAvailableModels(profile, defaultModel)
+  const { selectedModel } = getAIModelState()
+  const model =
+    selectedModel && availableModels.includes(selectedModel) ? selectedModel : defaultModel
+
+  return {
+    messages: buildLocalChatMessages(messages),
+    model,
+    profile,
+    profileId,
+  }
+}
+
+const createAvailableModels = (profile: DesktopLocalAIProfile, defaultModel: string): string[] => [
+  ...new Set([defaultModel, ...profile.models]),
+]
+
+const listProfilesForChat = async (
+  localAIIPC: DesktopLocalAIIPC,
+): Promise<DesktopLocalAIProfile[]> => {
+  try {
+    return await localAIIPC.listProfiles()
+  } catch (error) {
+    throw toSetupError(error)
+  }
+}
+
+const startLocalChatStream = async (
+  localAIIPC: DesktopLocalAIIPC,
+  input: Parameters<DesktopLocalAIIPC["startChatStream"]>[0],
+): ReturnType<DesktopLocalAIIPC["startChatStream"]> => {
+  try {
+    return await localAIIPC.startChatStream(input)
+  } catch (error) {
+    throw toSetupError(error)
+  }
+}
+
+const buildLocalChatMessages = (
+  messages: BizUIMessage[],
+): DesktopLocalAICompleteTextInput["messages"] => {
+  const entryContext = buildEntryContext(messages)
+  const localMessages: DesktopLocalAICompleteTextInput["messages"] = []
+  let hasConversationText = false
+  localMessages.push({
+    content: buildSystemPrompt(entryContext),
+    role: "system",
+  })
+
+  for (const message of messages) {
+    const content = extractMessageText(message)
+    if (!content) continue
+
+    localMessages.push({
+      content,
+      role: message.role,
+    })
+    hasConversationText = true
+  }
+
+  if (!hasConversationText) {
+    localMessages.push({
+      content: "Use the provided context to answer the user.",
+      role: "user",
+    })
+  }
+
+  return localMessages
+}
+
+const buildSystemPrompt = (entryContext: string | null): string => {
+  const personalizePrompt = getAISettings().personalizePrompt?.trim()
+  return [
+    DEFAULT_SYSTEM_PROMPT,
+    personalizePrompt ? `User preference:\n${personalizePrompt}` : null,
+    entryContext,
+  ]
+    .filter(Boolean)
+    .join("\n\n")
+}
+
+const extractMessageText = (message: BizUIMessage): string => {
+  const segments: string[] = []
+
+  for (const part of message.parts) {
+    switch (part.type) {
+      case "text": {
+        segments.push(part.text)
+        break
+      }
+      case "data-rich-text": {
+        segments.push(part.data.text)
+        break
+      }
+    }
+  }
+
+  return segments
+    .map((segment) => segment.trim())
+    .filter(Boolean)
+    .join("\n")
+}
+
+const buildEntryContext = (messages: BizUIMessage[]): string | null => {
+  const entryIds = new Set<string>()
+
+  for (const message of messages) {
+    for (const part of message.parts) {
+      if (part.type !== "data-block") continue
+
+      for (const block of part.data) {
+        if (block.type === "mainEntry" && block.value.trim()) {
+          entryIds.add(block.value.trim())
+        }
+      }
+    }
+  }
+
+  const contexts = Array.from(entryIds)
+    .map((entryId) => {
+      const entry = getEntry(entryId)
+      if (!entry) return null
+
+      const lines = [
+        `Entry ID: ${entryId}`,
+        entry.title ? `Title: ${entry.title}` : null,
+        entry.url ? `URL: ${entry.url}` : null,
+        entry.description
+          ? `Description: ${truncateText(entry.description, MAX_DESCRIPTION_LENGTH)}`
+          : null,
+        entry.content ? `Content: ${truncateText(entry.content, MAX_CONTEXT_LENGTH)}` : null,
+        entry.readabilityContent
+          ? `Readable Content: ${truncateText(entry.readabilityContent, MAX_CONTEXT_LENGTH)}`
+          : null,
+      ].filter(Boolean)
+
+      return lines.join("\n")
+    })
+    .filter(Boolean)
+
+  if (contexts.length === 0) return null
+
+  return [
+    "Current entry context is provided by Folo. Use it when answering the user's question.",
+    ...contexts,
+  ].join("\n\n")
+}
+
+const truncateText = (text: string, maxLength: number): string => {
+  const normalized = text.trim()
+  if (normalized.length <= maxLength) return normalized
+  return `${normalized.slice(0, maxLength)}...`
+}
+
+const createCompleteTextChunkStream = ({
+  abortSignal,
+  input,
+  localAIIPC,
+  onValue,
+}: {
+  abortSignal?: AbortSignal
+  input: DesktopLocalAICompleteTextInput
+  localAIIPC: DesktopLocalAIIPC
+  onValue?: (value: UIMessageChunk) => void
+}): ReadableStream<UIMessageChunk> =>
+  new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      const requestId = createLocalAITextRequestId()
+      let closed = false
+
+      const enqueue = (chunk: UIMessageChunk) => {
+        if (closed) return
+        onValue?.(chunk)
+        controller.enqueue(chunk)
+      }
+
+      const close = () => {
+        if (closed) return
+        closed = true
+        if (abortSignal) {
+          abortSignal.removeEventListener("abort", handleAbort)
+        }
+        controller.close()
+      }
+
+      const handleAbort = () => {
+        void localAIIPC.stopTextCompletion?.(requestId)
+        enqueue({ reason: "user", type: "abort" })
+        close()
+      }
+
+      if (abortSignal?.aborted) {
+        handleAbort()
+        return
+      }
+
+      if (abortSignal) {
+        abortSignal.addEventListener("abort", handleAbort, { once: true })
+      }
+
+      void localAIIPC
+        .completeText({
+          ...input,
+          requestId,
+        })
+        .then((result) => {
+          for (const chunk of createTextChunks(result.text)) {
+            enqueue(chunk)
+          }
+          close()
+        })
+        .catch((error) => {
+          enqueue({ errorText: getErrorMessage(error), type: "error" })
+          close()
+        })
+    },
+  })
+
+const createTextChunks = (text: string): UIMessageChunk[] => [
+  { type: "start" },
+  { type: "start-step" },
+  { id: TEXT_PART_ID, type: "text-start" },
+  ...(text ? [{ delta: text, id: TEXT_PART_ID, type: "text-delta" } satisfies UIMessageChunk] : []),
+  { id: TEXT_PART_ID, type: "text-end" },
+  { type: "finish-step" },
+  { finishReason: "stop", type: "finish" },
+]
+
+const createIPCChunkStream = ({
+  abortSignal,
+  localAIIPC,
+  onValue,
+  streamId,
+}: {
+  abortSignal?: AbortSignal
+  localAIIPC: DesktopLocalAIIPC
+  onValue?: (value: UIMessageChunk) => void
+  streamId: string
+}): ReadableStream<UIMessageChunk> =>
+  new ReadableStream<UIMessageChunk>({
+    start(controller) {
+      const cleanups: Array<() => void> = []
+      let closed = false
+      let hasTextStarted = false
+
+      const cleanup = () => {
+        for (const dispose of cleanups.splice(0)) {
+          dispose()
+        }
+      }
+
+      const enqueue = (chunk: UIMessageChunk) => {
+        if (closed) return
+        onValue?.(chunk)
+        controller.enqueue(chunk)
+      }
+
+      const close = () => {
+        if (closed) return
+        closed = true
+        cleanup()
+        controller.close()
+      }
+
+      const ensureTextStarted = () => {
+        if (hasTextStarted) return
+        enqueue({ type: "start" })
+        enqueue({ type: "start-step" })
+        enqueue({ id: TEXT_PART_ID, type: "text-start" })
+        hasTextStarted = true
+      }
+
+      const handleAbort = () => {
+        void localAIIPC.stopChatStream?.(streamId)
+        enqueue({ reason: "user", type: "abort" })
+        close()
+      }
+
+      if (abortSignal?.aborted) {
+        handleAbort()
+        return
+      }
+
+      if (!window.electron?.ipcRenderer) {
+        enqueue({ errorText: "Local AI IPC renderer is unavailable", type: "error" })
+        close()
+        return
+      }
+
+      cleanups.push(
+        window.electron.ipcRenderer.on("local-ai:chat-delta", (_event, payload: unknown) => {
+          if (!isDeltaPayload(payload, streamId)) return
+          ensureTextStarted()
+          enqueue({ delta: payload.delta, id: TEXT_PART_ID, type: "text-delta" })
+        }),
+        window.electron.ipcRenderer.on("local-ai:chat-error", (_event, payload: unknown) => {
+          if (!isErrorPayload(payload, streamId)) return
+          enqueue({ errorText: payload.message, type: "error" })
+          close()
+        }),
+        window.electron.ipcRenderer.on("local-ai:chat-finish", (_event, payload: unknown) => {
+          if (!isFinishPayload(payload, streamId)) return
+          ensureTextStarted()
+          enqueue({ id: TEXT_PART_ID, type: "text-end" })
+          enqueue({ type: "finish-step" })
+          enqueue({ finishReason: "stop", type: "finish" })
+          close()
+        }),
+      )
+
+      if (abortSignal) {
+        abortSignal.addEventListener("abort", handleAbort, { once: true })
+        cleanups.push(() => abortSignal.removeEventListener("abort", handleAbort))
+      }
+    },
+  })
+
+const isDeltaPayload = (payload: unknown, streamId: string): payload is LocalAIChatDeltaPayload =>
+  isRecord(payload) && payload.streamId === streamId && typeof payload.delta === "string"
+
+const isErrorPayload = (payload: unknown, streamId: string): payload is LocalAIChatErrorPayload =>
+  isRecord(payload) && payload.streamId === streamId && typeof payload.message === "string"
+
+const isFinishPayload = (payload: unknown, streamId: string): payload is LocalAIChatFinishPayload =>
+  isRecord(payload) && payload.streamId === streamId
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+class LocalAIChatSetupError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = "LocalAIChatSetupError"
+  }
+}
+
+const toSetupError = (error: unknown): LocalAIChatSetupError =>
+  error instanceof LocalAIChatSetupError ? error : new LocalAIChatSetupError(getErrorMessage(error))
+
+const getErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error)
+
+const createLocalAITextRequestId = (): string => {
+  const randomUUID = globalThis.crypto?.randomUUID?.()
+  if (randomUUID) {
+    return `local-ai-text-${randomUUID}`
+  }
+  return `local-ai-text-${Date.now()}-${Math.random().toString(36).slice(2)}`
+}

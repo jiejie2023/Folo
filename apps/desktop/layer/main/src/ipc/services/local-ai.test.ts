@@ -160,6 +160,7 @@ describe("LocalAIService", () => {
     ).resolves.toEqual(result)
 
     expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
+      abortSignal: undefined,
       apiKey: "sk-secret-raw",
       messages: [{ content: "Hi", role: "user" }],
       model: "llama3",
@@ -214,6 +215,42 @@ describe("LocalAIService", () => {
 
     expect(recordLocalAIUsage).toHaveBeenCalledWith({
       errorMessage: "bad [redacted] token",
+      feature: "chat",
+      model: "llama3",
+      ok: false,
+      profileId: "profile-1",
+      totalTokens: null,
+    })
+  })
+
+  it("aborts an active completeText request when stopTextCompletion is called", async () => {
+    let abortSignal: AbortSignal | undefined
+    completeOpenAICompatibleText.mockImplementation(
+      async ({ abortSignal: signal }: { abortSignal?: AbortSignal }) => {
+        abortSignal = signal
+
+        return new Promise<LocalAITextResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+        })
+      },
+    )
+    const service = new LocalAIService()
+
+    const promise = service.completeText(context, {
+      messages: [{ content: "Hi", role: "user" }],
+      model: "llama3",
+      profileId: "profile-1",
+      requestId: "request-1",
+    })
+
+    expect(abortSignal?.aborted).toBe(false)
+
+    service.stopTextCompletion(context, "request-1")
+
+    await expect(promise).rejects.toThrow("aborted")
+    expect(abortSignal?.aborted).toBe(true)
+    expect(recordLocalAIUsage).toHaveBeenCalledWith({
+      errorMessage: "aborted",
       feature: "chat",
       model: "llama3",
       ok: false,
@@ -285,6 +322,37 @@ describe("LocalAIService", () => {
       ok: true,
       profileId: "profile-1",
       totalTokens: 10,
+    })
+  })
+
+  it("aborts an active chat stream when stopChatStream is called", async () => {
+    let abortSignal: AbortSignal | undefined
+    streamOpenAICompatibleChat.mockImplementation(
+      async ({ abortSignal: signal }: { abortSignal?: AbortSignal }) => {
+        abortSignal = signal
+
+        return new Promise<LocalAITextResult>((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true })
+        })
+      },
+    )
+    const service = new LocalAIService()
+
+    const result = service.startChatStream(context, {
+      messages: [{ content: "Hi", role: "user" }],
+      model: "llama3",
+      profileId: "profile-1",
+    })
+
+    expect(abortSignal?.aborted).toBe(false)
+
+    service.stopChatStream(context, result.streamId)
+    await flushPromises()
+
+    expect(abortSignal?.aborted).toBe(true)
+    expect(context.sender.send).toHaveBeenCalledWith("local-ai:chat-error", {
+      message: "aborted",
+      streamId: result.streamId,
     })
   })
 

@@ -1,6 +1,9 @@
 import { env } from "@follow/shared/env.desktop"
-import type { HttpChatTransportInitOptions, UIMessageChunk } from "ai"
+import type { ChatTransport, HttpChatTransportInitOptions, UIMessageChunk } from "ai"
 import { HttpChatTransport, parseJsonEventStream, uiMessageChunkSchema } from "ai"
+
+import { createLocalAIChatTransport } from "~/modules/local-ai/chat-transport"
+import { getLocalAIProfileId } from "~/modules/local-ai/hooks"
 
 import { getAIModelState } from "../atoms/session"
 import { AIPersistService } from "../services"
@@ -45,7 +48,45 @@ export function createChatTitleHandler(
  * This is used by the AbstractChat instance to communicate with AI providers
  */
 export function createChatTransport({ onValue, titleHandler }: CreateChatTransportOptions = {}) {
-  return new ExtendChatTransport({
+  const createCloudTransport = () => createCloudChatTransport({ onValue, titleHandler })
+
+  return new RoutedChatTransport({
+    createCloudTransport,
+    createLocalTransport: () =>
+      createLocalAIChatTransport({
+        createCloudTransport,
+        onValue,
+      }),
+  })
+}
+
+type RoutedChatTransportOptions = {
+  createCloudTransport: () => ChatTransport<BizUIMessage>
+  createLocalTransport: () => ChatTransport<BizUIMessage>
+}
+
+class RoutedChatTransport implements ChatTransport<BizUIMessage> {
+  constructor(private readonly options: RoutedChatTransportOptions) {}
+
+  sendMessages(options: Parameters<ChatTransport<BizUIMessage>["sendMessages"]>[0]) {
+    return this.createCurrentTransport().sendMessages(options)
+  }
+
+  reconnectToStream(options: Parameters<ChatTransport<BizUIMessage>["reconnectToStream"]>[0]) {
+    return this.createCurrentTransport().reconnectToStream(options)
+  }
+
+  private createCurrentTransport(): ChatTransport<BizUIMessage> {
+    if (getLocalAIProfileId("chat")) {
+      return this.options.createLocalTransport()
+    }
+
+    return this.options.createCloudTransport()
+  }
+}
+
+const createCloudChatTransport = ({ onValue, titleHandler }: CreateChatTransportOptions = {}) =>
+  new ExtendChatTransport({
     onValue,
     titleHandler,
     // Custom fetch configuration
@@ -59,7 +100,6 @@ export function createChatTransport({ onValue, titleHandler }: CreateChatTranspo
       return selectedModel ? { model: selectedModel } : {}
     },
   })
-}
 
 type UIMessageChunkParseResult =
   ReturnType<typeof parseJsonEventStream<UIMessageChunk>> extends ReadableStream<infer T>

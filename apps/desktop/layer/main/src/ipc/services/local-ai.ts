@@ -34,6 +34,7 @@ type LocalAICompleteTextInput = {
   messages: LocalAIChatMessage[]
   model: string
   profileId: string
+  requestId?: string
   responseFormat?: "json_object"
   temperature?: number
 }
@@ -66,6 +67,9 @@ type ResolvedProfile = {
 
 export class LocalAIService extends IpcService {
   static override readonly groupName = "localAI"
+
+  private readonly chatStreamControllers = new Map<string, AbortController>()
+  private readonly textCompletionControllers = new Map<string, AbortController>()
 
   @IpcMethod()
   listProfiles(_context: IpcContext): LocalAIProfileView[] {
@@ -113,6 +117,10 @@ export class LocalAIService extends IpcService {
   ): Promise<LocalAITextResult> {
     let apiKey: string | null = null
     const feature = input.feature ?? "chat"
+    const abortController = input.requestId ? new AbortController() : null
+    if (input.requestId && abortController) {
+      this.textCompletionControllers.set(input.requestId, abortController)
+    }
 
     try {
       const resolved = resolveProfile(input.profileId)
@@ -122,6 +130,7 @@ export class LocalAIService extends IpcService {
       }
 
       const result = await completeOpenAICompatibleText({
+        abortSignal: abortController?.signal,
         apiKey: resolved.apiKey,
         maxTokens: input.maxTokens,
         messages: input.messages,
@@ -149,16 +158,34 @@ export class LocalAIService extends IpcService {
         totalTokens: null,
       })
       throw new Error(message)
+    } finally {
+      if (input.requestId) {
+        this.textCompletionControllers.delete(input.requestId)
+      }
     }
+  }
+
+  @IpcMethod()
+  stopTextCompletion(_context: IpcContext, requestId: string): void {
+    this.textCompletionControllers.get(requestId)?.abort()
+    this.textCompletionControllers.delete(requestId)
   }
 
   @IpcMethod()
   startChatStream(context: IpcContext, input: LocalAIChatStreamInput): { streamId: string } {
     const streamId = `local-ai-stream-${randomUUID()}`
+    const abortController = new AbortController()
 
-    void this.runChatStream(context, streamId, input)
+    this.chatStreamControllers.set(streamId, abortController)
+    void this.runChatStream(context, streamId, input, abortController.signal)
 
     return { streamId }
+  }
+
+  @IpcMethod()
+  stopChatStream(_context: IpcContext, streamId: string): void {
+    this.chatStreamControllers.get(streamId)?.abort()
+    this.chatStreamControllers.delete(streamId)
   }
 
   @IpcMethod()
@@ -222,6 +249,7 @@ export class LocalAIService extends IpcService {
     context: IpcContext,
     streamId: string,
     input: LocalAIChatStreamInput,
+    abortSignal: AbortSignal,
   ): Promise<void> {
     let apiKey: string | null = null
 
@@ -230,6 +258,7 @@ export class LocalAIService extends IpcService {
       apiKey = resolved.apiKey
 
       const result = await streamOpenAICompatibleChat({
+        abortSignal,
         apiKey: resolved.apiKey,
         maxTokens: input.maxTokens,
         messages: input.messages,
@@ -260,6 +289,8 @@ export class LocalAIService extends IpcService {
         totalTokens: null,
       })
       context.sender.send("local-ai:chat-error", { message, streamId })
+    } finally {
+      this.chatStreamControllers.delete(streamId)
     }
   }
 }

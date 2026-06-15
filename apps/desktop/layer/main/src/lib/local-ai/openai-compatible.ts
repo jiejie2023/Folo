@@ -68,6 +68,7 @@ export const listOpenAICompatibleModels = async ({
 }
 
 export const completeOpenAICompatibleText = async ({
+  abortSignal,
   apiKey,
   fetchFn = fetch,
   maxTokens,
@@ -77,6 +78,7 @@ export const completeOpenAICompatibleText = async ({
   responseFormat,
   temperature,
 }: {
+  abortSignal?: AbortSignal
   apiKey: string
   fetchFn?: FetchFn
   maxTokens?: number
@@ -99,6 +101,7 @@ export const completeOpenAICompatibleText = async ({
     ),
     headers: buildHeaders(profile, apiKey, true),
     method: "POST",
+    signal: abortSignal,
   })
 
   await assertOK(response, apiKey)
@@ -116,6 +119,7 @@ export const completeOpenAICompatibleText = async ({
 }
 
 export const streamOpenAICompatibleChat = async ({
+  abortSignal,
   apiKey,
   fetchFn = fetch,
   maxTokens,
@@ -125,6 +129,7 @@ export const streamOpenAICompatibleChat = async ({
   profile,
   temperature,
 }: {
+  abortSignal?: AbortSignal
   apiKey: string
   fetchFn?: FetchFn
   maxTokens?: number
@@ -146,6 +151,7 @@ export const streamOpenAICompatibleChat = async ({
     ),
     headers: buildHeaders(profile, apiKey, true),
     method: "POST",
+    signal: abortSignal,
   })
 
   await assertOK(response, apiKey)

@@ -92,6 +92,7 @@ export type DesktopLocalAICompleteTextInput = {
   }>
   model: string
   profileId: string
+  requestId?: string
   responseFormat?: "json_object"
   temperature?: number
 }
@@ -103,6 +104,15 @@ export type DesktopLocalAIIPC = {
   listModels: (profileId: string) => Promise<string[]>
   listProfiles: () => Promise<DesktopLocalAIProfile[]>
   listUsage: (limit?: number) => Promise<DesktopLocalAIUsageRecord[]>
+  startChatStream: (input: {
+    maxTokens?: number
+    messages: DesktopLocalAICompleteTextInput["messages"]
+    model: string
+    profileId: string
+    temperature?: number
+  }) => Promise<{ streamId: string }>
+  stopChatStream?: (streamId: string) => Promise<void>
+  stopTextCompletion?: (requestId: string) => Promise<void>
   synthesizeSpeech: (input: {
     format?: string
     input: string
