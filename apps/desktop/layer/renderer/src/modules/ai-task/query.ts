@@ -12,6 +12,7 @@ import type {
   UpdateTaskRequest,
 } from "@follow-app/client-sdk"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import dayjs from "dayjs"
 import { nanoid } from "nanoid"
 
 import { getAISettings, setAISetting } from "~/atoms/settings/ai"
@@ -52,19 +53,104 @@ const findLocalAITask = (id: string): LocalAITask => {
   return task
 }
 
-const getNextRunAt = (schedule: CreateTaskRequest["schedule"]): string | null => {
+type TestRunAITaskOptions = {
+  now?: Date
+  reschedule?: boolean
+  timeout?: number
+}
+
+const getNextRunAt = (
+  schedule: CreateTaskRequest["schedule"],
+  after: Date = new Date(),
+): string | null => {
+  const reference = dayjs(after)
+
   switch (schedule.type) {
     case "once": {
-      return schedule.date
+      const date = dayjs(schedule.date)
+      return date.isAfter(reference) ? date.toISOString() : null
     }
-    case "daily":
-    case "weekly":
+    case "daily": {
+      return getNextDailyRunAt(schedule.timeOfDay, reference)
+    }
+    case "weekly": {
+      return getNextWeeklyRunAt(schedule.dayOfWeek, schedule.timeOfDay, reference)
+    }
     case "monthly": {
-      return schedule.timeOfDay
+      return getNextMonthlyRunAt(schedule.dayOfMonth, schedule.timeOfDay, reference)
     }
     default: {
       return null
     }
+  }
+}
+
+const getNextDailyRunAt = (timeOfDay: string, reference: dayjs.Dayjs): string => {
+  const time = dayjs(timeOfDay)
+  let candidate = reference
+    .hour(time.hour())
+    .minute(time.minute())
+    .second(time.second())
+    .millisecond(time.millisecond())
+  if (!candidate.isAfter(reference)) {
+    candidate = candidate.add(1, "day")
+  }
+  return candidate.toISOString()
+}
+
+const getNextWeeklyRunAt = (
+  dayOfWeek: number,
+  timeOfDay: string,
+  reference: dayjs.Dayjs,
+): string => {
+  const time = dayjs(timeOfDay)
+  let candidate = reference
+    .day(dayOfWeek)
+    .hour(time.hour())
+    .minute(time.minute())
+    .second(time.second())
+    .millisecond(time.millisecond())
+  if (!candidate.isAfter(reference)) {
+    candidate = candidate.add(1, "week")
+  }
+  return candidate.toISOString()
+}
+
+const getNextMonthlyRunAt = (
+  dayOfMonth: number,
+  timeOfDay: string,
+  reference: dayjs.Dayjs,
+): string => {
+  const time = dayjs(timeOfDay)
+  const applyDayAndTime = (value: dayjs.Dayjs) =>
+    value
+      .date(Math.min(dayOfMonth, value.daysInMonth()))
+      .hour(time.hour())
+      .minute(time.minute())
+      .second(time.second())
+      .millisecond(time.millisecond())
+
+  let candidate = applyDayAndTime(reference)
+  if (!candidate.isAfter(reference)) {
+    candidate = applyDayAndTime(reference.add(1, "month"))
+  }
+  return candidate.toISOString()
+}
+
+const getPostRunScheduleUpdate = (
+  task: LocalAITask,
+  timestamp: Date,
+): Pick<LocalAITask, "isEnabled" | "nextRunAt"> => {
+  if (task.schedule.type === "once") {
+    return {
+      isEnabled: false,
+      nextRunAt: null,
+    }
+  }
+
+  return {
+    isEnabled: task.isEnabled,
+    nextRunAt: getNextRunAt(task.schedule, timestamp),
   }
 }
 
@@ -248,7 +334,7 @@ export const deleteAITask = async ({ id }: { id: string }): Promise<TaskDeleteRe
 
 export const testRunAITask = async (
   { id }: { id: string },
-  options?: { timeout?: number },
+  options?: TestRunAITaskOptions,
 ): Promise<TaskTestRunResponse> => {
   if (!isLocalAITaskMode()) {
     return followApi.aiTask.testRun({ id }, options)
@@ -260,9 +346,10 @@ export const testRunAITask = async (
   }
 
   const task = findLocalAITask(id)
-  const timestamp = new Date()
+  const timestamp = options?.now ?? new Date()
   const prompt = extractTaskPromptText(task.prompt)
   const sessionId = `ai-task-${task.id}-${nanoid(8)}`
+  const scheduleUpdate = options?.reschedule ? getPostRunScheduleUpdate(task, timestamp) : {}
 
   try {
     const result = await createDesktopLocalAIBridge().runTask({
@@ -280,6 +367,7 @@ export const testRunAITask = async (
     const output = result.output.trim()
     const updatedTask: LocalAITask = {
       ...task,
+      ...scheduleUpdate,
       lastError: null,
       lastResult: output,
       lastRunAt: timestamp.toISOString(),
@@ -305,6 +393,7 @@ export const testRunAITask = async (
     const message = error instanceof Error ? error.message : String(error)
     replaceLocalTask({
       ...task,
+      ...scheduleUpdate,
       lastError: message,
       lastRunAt: timestamp.toISOString(),
       runCount: task.runCount + 1,
@@ -316,6 +405,21 @@ export const testRunAITask = async (
       taskId: task.id,
     }) satisfies TaskTestRunResponse
   }
+}
+
+export const runDueLocalAITasks = async (now = new Date()): Promise<number> => {
+  if (!isLocalAITaskMode()) return 0
+
+  const dueTasks = getLocalAITasks().filter((task) => {
+    if (!task.isEnabled || !task.nextRunAt) return false
+    return !dayjs(task.nextRunAt).isAfter(now)
+  })
+
+  for (const task of dueTasks) {
+    await testRunAITask({ id: task.id }, { now, reschedule: true })
+  }
+
+  return dueTasks.length
 }
 
 // Queries

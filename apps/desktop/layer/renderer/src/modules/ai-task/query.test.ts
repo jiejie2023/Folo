@@ -9,6 +9,7 @@ import {
   deleteAITask,
   getAITask,
   listAITasks,
+  runDueLocalAITasks,
   testRunAITask,
   updateAITask,
 } from "./query"
@@ -221,6 +222,43 @@ describe("local AI task data layer", () => {
         id: "local-ai-task-1",
         lastError: null,
         lastResult: "Local task result.",
+        runCount: 1,
+      }),
+    ])
+  })
+
+  it("runs due local tasks and advances recurring schedules", async () => {
+    const settings = createSettings({
+      aiTasks: [
+        {
+          ...taskInput,
+          id: "local-ai-task-1",
+          createdAt: "2026-06-15T00:00:00.000Z",
+          isEnabled: true,
+          lastError: null,
+          lastResult: null,
+          lastRunAt: null,
+          nextRunAt: "2026-06-15T08:00:00.000Z",
+          options: { notifyChannels: ["email"] },
+          runCount: 0,
+          schedule: {
+            timeOfDay: "2026-06-15T08:00:00.000Z",
+            type: "daily",
+          },
+          updatedAt: "2026-06-15T00:00:00.000Z",
+        },
+      ],
+    })
+    mocks.getAISettings.mockReturnValue(settings)
+
+    await runDueLocalAITasks(new Date("2026-06-15T08:01:00.000Z"))
+
+    expect(mocks.runTask).toHaveBeenCalledOnce()
+    expect(mocks.setAISetting).toHaveBeenLastCalledWith("aiTasks", [
+      expect.objectContaining({
+        id: "local-ai-task-1",
+        lastResult: "Local task result.",
+        nextRunAt: "2026-06-16T08:00:00.000Z",
         runCount: 1,
       }),
     ])
