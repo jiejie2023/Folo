@@ -81,6 +81,14 @@ export type DesktopLocalAISpeechResult = {
   mimeType: string
 }
 
+export type DesktopLocalAIProfileTestResult = {
+  message: string
+  model: string
+  models: string[]
+  ok: boolean
+  testedAt: string
+}
+
 export type DesktopLocalAICompleteTextInput = {
   feature: LocalAIFeature
   maxTokens?: number
@@ -121,6 +129,10 @@ export type DesktopLocalAIIPC = {
     profileId: string
     voice?: string
   }) => Promise<DesktopLocalAISpeechResult>
+  testProfile: (
+    profileId: string,
+    modelOverride?: string | null,
+  ) => Promise<DesktopLocalAIProfileTestResult>
   upsertProfile: (input: DesktopLocalAIProfileInput) => Promise<DesktopLocalAIStoredProfile>
 }
 

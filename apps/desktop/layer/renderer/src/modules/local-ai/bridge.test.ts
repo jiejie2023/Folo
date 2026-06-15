@@ -6,6 +6,7 @@ import type { DesktopLocalAIProfile, DesktopLocalAIStoredProfile } from "./hooks
 const mocks = vi.hoisted(() => ({
   completeText: vi.fn(),
   listProfiles: vi.fn(),
+  testProfile: vi.fn(),
   upsertProfile: vi.fn(),
 }))
 
@@ -18,6 +19,7 @@ vi.mock("./hooks", () => ({
   getLocalAIIPC: () => ({
     completeText: mocks.completeText,
     listProfiles: mocks.listProfiles,
+    testProfile: mocks.testProfile,
     upsertProfile: mocks.upsertProfile,
   }),
   resolveLocalAIProfileId: vi.fn(),
@@ -141,6 +143,34 @@ describe("createDesktopLocalAIBridge saveProfile", () => {
         models: ["chat-model", "discovered-model", "new-chat-model"],
       }),
     )
+  })
+})
+
+describe("createDesktopLocalAIBridge testProfile", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.testProfile.mockResolvedValue({
+      message: "Connection test succeeded with chat-model",
+      model: "chat-model",
+      models: ["chat-model"],
+      ok: true,
+      testedAt: "2026-06-14T01:00:00.000Z",
+    })
+  })
+
+  it("delegates profile tests to the desktop IPC connection test", async () => {
+    const bridge = createDesktopLocalAIBridge()
+
+    await expect(
+      bridge.testProfile({ model: "chat-model", profileId: "profile-1" }),
+    ).resolves.toEqual(
+      expect.objectContaining({
+        model: "chat-model",
+        ok: true,
+      }),
+    )
+
+    expect(mocks.testProfile).toHaveBeenCalledWith("profile-1", "chat-model")
   })
 })
 

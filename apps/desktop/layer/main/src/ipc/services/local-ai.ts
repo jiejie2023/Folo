@@ -61,6 +61,14 @@ type LocalAISpeechResult = {
   mimeType: string
 }
 
+type LocalAIProfileTestResult = {
+  message: string
+  model: string
+  models: string[]
+  ok: boolean
+  testedAt: string
+}
+
 type ResolvedProfile = {
   apiKey: string
   profile: LocalAIStoredProfile
@@ -100,6 +108,68 @@ export class LocalAIService extends IpcService {
         testedAt: new Date().toISOString(),
       })
       return models
+    } catch (error) {
+      const message = sanitizeErrorMessage(error, apiKey)
+      updateLocalAIProfileTestResult?.(profileId, {
+        message,
+        ok: false,
+        testedAt: new Date().toISOString(),
+      })
+      throw new Error(message)
+    }
+  }
+
+  @IpcMethod()
+  async testProfile(
+    _context: IpcContext,
+    profileId: string,
+    modelOverride?: string | null,
+  ): Promise<LocalAIProfileTestResult> {
+    let apiKey: string | null = null
+
+    try {
+      const resolved = resolveProfile(profileId)
+      apiKey = resolved.apiKey
+
+      const models = await listOpenAICompatibleModels({
+        apiKey: resolved.apiKey,
+        profile: resolved.profile,
+      })
+      updateLocalAIProfileModels(profileId, models)
+
+      const model =
+        modelOverride ??
+        resolved.profile.defaultChatModel ??
+        models[0] ??
+        resolved.profile.models[0]
+      if (!model) {
+        throw new Error("Local AI profile has no chat model to test")
+      }
+
+      await completeOpenAICompatibleText({
+        apiKey: resolved.apiKey,
+        maxTokens: 4,
+        messages: [{ content: "Reply with OK.", role: "user" }],
+        model,
+        profile: resolved.profile,
+        temperature: 0,
+      })
+
+      const testedAt = new Date().toISOString()
+      const message = `Connection test succeeded with ${model}`
+      updateLocalAIProfileTestResult?.(profileId, {
+        message,
+        ok: true,
+        testedAt,
+      })
+
+      return {
+        message,
+        model,
+        models,
+        ok: true,
+        testedAt,
+      }
     } catch (error) {
       const message = sanitizeErrorMessage(error, apiKey)
       updateLocalAIProfileTestResult?.(profileId, {

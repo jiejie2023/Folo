@@ -19,18 +19,21 @@ export const APIProfileItem = ({ onDelete, onEdit, profile }: APIProfileItemProp
   const queryClient = useQueryClient()
   const [isTesting, setIsTesting] = useState(false)
 
-  const handleListModels = async () => {
+  const handleTestProfile = async () => {
     setIsTesting(true)
     try {
       const localAIIPC = getLocalAIIPC()
       if (!localAIIPC) throw new Error(t("api_management.ipc_unavailable"))
-      const models = await localAIIPC.listModels(profile.id)
+      const result = await localAIIPC.testProfile(profile.id)
       await queryClient.invalidateQueries({ queryKey: localAIQueryKeys.profiles })
-      toast.success(t("api_management.profile.models_loaded", { count: models.length }))
-    } catch (error) {
-      toast.error(
-        error instanceof Error ? error.message : t("api_management.profile.models_failed"),
+      toast.success(
+        t("api_management.profile.test_succeeded", {
+          count: result.models.length,
+          model: result.model,
+        }),
       )
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t("api_management.profile.test_failed"))
     } finally {
       setIsTesting(false)
     }
@@ -78,7 +81,7 @@ export const APIProfileItem = ({ onDelete, onEdit, profile }: APIProfileItemProp
         </div>
 
         <div className="flex shrink-0 gap-2">
-          <Button variant="ghost" size="sm" onClick={handleListModels} isLoading={isTesting}>
+          <Button variant="ghost" size="sm" onClick={handleTestProfile} isLoading={isTesting}>
             {t("api_management.profile.test")}
           </Button>
           <Button

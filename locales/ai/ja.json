@@ -92,6 +92,8 @@
   "api_management.profile.save_failed": "プロファイルを保存できませんでした",
   "api_management.profile.saved": "プロファイルを保存しました",
   "api_management.profile.test": "テスト",
+  "api_management.profile.test_failed": "接続テストに失敗しました",
+  "api_management.profile.test_succeeded": "{{model}} で接続テストに成功しました（{{count}} 個のモデル）",
   "api_management.profile.validation.base_url_required": "ベース URL は必須です",
   "api_management.profile.validation.invalid_url": "有効な URL を入力してください",
   "api_management.profile.validation.name_required": "名前は必須です",

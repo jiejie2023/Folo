@@ -146,6 +146,34 @@ describe("LocalAIService", () => {
     )
   })
 
+  it("tests a profile by listing models and completing a tiny chat request", async () => {
+    listOpenAICompatibleModels.mockResolvedValue(["llama3", "nomic-embed"])
+    completeOpenAICompatibleText.mockResolvedValue({ text: "OK", totalTokens: 2 })
+    const service = new LocalAIService()
+
+    await expect(service.testProfile(context, "profile-1")).resolves.toEqual(
+      expect.objectContaining({
+        model: "llama3",
+        models: ["llama3", "nomic-embed"],
+        ok: true,
+      }),
+    )
+
+    expect(updateLocalAIProfileModels).toHaveBeenCalledWith("profile-1", ["llama3", "nomic-embed"])
+    expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
+      apiKey: "sk-secret-raw",
+      maxTokens: 4,
+      messages: [{ content: "Reply with OK.", role: "user" }],
+      model: "llama3",
+      profile: storedProfile,
+      temperature: 0,
+    })
+    expect(updateLocalAIProfileTestResult).toHaveBeenCalledWith(
+      "profile-1",
+      expect.objectContaining({ ok: true }),
+    )
+  })
+
   it("returns completeText result and records successful usage", async () => {
     const result: LocalAITextResult = { text: "Hello", totalTokens: 12 }
     completeOpenAICompatibleText.mockResolvedValue(result)

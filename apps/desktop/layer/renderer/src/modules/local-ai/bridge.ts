@@ -59,10 +59,10 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
         return { error: "Save the profile before testing it.", ok: false }
       }
 
-      const models = await requireLocalAIIPC().listModels(profileId)
+      const result = await requireLocalAIIPC().testProfile(profileId, input.model)
       return {
         latencyMs: Date.now() - startedAt,
-        model: input.model ?? models[0],
+        model: result.model,
         ok: true,
       }
     } catch (error) {
