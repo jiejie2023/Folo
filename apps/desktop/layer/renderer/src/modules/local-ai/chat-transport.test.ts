@@ -212,6 +212,7 @@ describe("createLocalAIChatTransport", () => {
     })
 
     expect(ipc.startChatStream).toHaveBeenCalledWith({
+      feature: "chat",
       messages: [
         expect.objectContaining({
           content: expect.stringContaining("Current entry context"),
@@ -268,6 +269,60 @@ describe("createLocalAIChatTransport", () => {
       role: "system",
       content: expect.stringContaining("Answer in concise Chinese."),
     })
+  })
+
+  it("uses the timeline model when the local chat transport is created for timeline summary", async () => {
+    mocks.getAISettings.mockReturnValue({
+      localAI: {
+        allowFallbackToCloud: false,
+        defaultProfileId: "profile-1",
+        enabled: true,
+        featureRouting: {
+          chat: "cloud",
+          mcp: "cloud",
+          onboardingRecommendations: "cloud",
+          summary: "cloud",
+          tasks: "cloud",
+          timelineRanking: "cloud",
+          timelineSummary: "local",
+          translation: "cloud",
+          tts: "cloud",
+        },
+      },
+    })
+    const ipc = createIPC({
+      listProfiles: vi.fn().mockResolvedValue([
+        {
+          ...profile,
+          defaultTimelineModel: "timeline-model",
+          models: ["llama3", "timeline-model"],
+        },
+      ]),
+    })
+    mocks.getLocalAIIPC.mockReturnValue(ipc)
+    const transport = createLocalAIChatTransport({
+      createCloudTransport: () =>
+        ({
+          reconnectToStream: vi.fn(),
+          sendMessages: mocks.fallbackSendMessages,
+        }) as ReturnType<Parameters<typeof createLocalAIChatTransport>[0]["createCloudTransport"]>,
+      feature: "timelineSummary",
+    })
+
+    await transport.sendMessages({
+      abortSignal: undefined,
+      chatId: "chat-1",
+      messageId: undefined,
+      messages: [createMessage([{ type: "text", text: "Summarize timeline" }])],
+      trigger: "submit-message",
+    })
+
+    expect(ipc.startChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "timelineSummary",
+        model: "timeline-model",
+      }),
+    )
   })
 
   it("falls back to cloud transport when local startup fails and fallback is enabled", async () => {

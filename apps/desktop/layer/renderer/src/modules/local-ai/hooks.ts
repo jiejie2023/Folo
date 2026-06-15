@@ -105,6 +105,7 @@ export type DesktopLocalAIIPC = {
   listProfiles: () => Promise<DesktopLocalAIProfile[]>
   listUsage: (limit?: number) => Promise<DesktopLocalAIUsageRecord[]>
   startChatStream: (input: {
+    feature?: LocalAIFeature
     maxTokens?: number
     messages: DesktopLocalAICompleteTextInput["messages"]
     model: string

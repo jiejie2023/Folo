@@ -272,7 +272,7 @@ export const useAutoTimelineSummaryShortcut = () => {
         const message = buildSummaryMessage(tempEditor, contextBlocks, nanoid())
 
         await chatActions.sendMessage(message, {
-          body: { scene: "general" },
+          body: { localAIFeature: "timelineSummary", scene: "general" },
         })
 
         automationStateRef.current.failed = false

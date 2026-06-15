@@ -1,4 +1,5 @@
 import { env } from "@follow/shared/env.desktop"
+import type { LocalAIFeature } from "@follow/shared/settings/interface"
 import type { ChatTransport, HttpChatTransportInitOptions, UIMessageChunk } from "ai"
 import { HttpChatTransport, parseJsonEventStream, uiMessageChunkSchema } from "ai"
 
@@ -52,9 +53,10 @@ export function createChatTransport({ onValue, titleHandler }: CreateChatTranspo
 
   return new RoutedChatTransport({
     createCloudTransport,
-    createLocalTransport: () =>
+    createLocalTransport: (feature) =>
       createLocalAIChatTransport({
         createCloudTransport,
+        feature,
         onValue,
       }),
   })
@@ -62,28 +64,59 @@ export function createChatTransport({ onValue, titleHandler }: CreateChatTranspo
 
 type RoutedChatTransportOptions = {
   createCloudTransport: () => ChatTransport<BizUIMessage>
-  createLocalTransport: () => ChatTransport<BizUIMessage>
+  createLocalTransport: (feature: LocalAIFeature) => ChatTransport<BizUIMessage>
 }
 
 class RoutedChatTransport implements ChatTransport<BizUIMessage> {
   constructor(private readonly options: RoutedChatTransportOptions) {}
 
   sendMessages(options: Parameters<ChatTransport<BizUIMessage>["sendMessages"]>[0]) {
-    return this.createCurrentTransport().sendMessages(options)
+    return this.createCurrentTransport(resolveLocalAITransportFeature(options)).sendMessages(
+      options,
+    )
   }
 
   reconnectToStream(options: Parameters<ChatTransport<BizUIMessage>["reconnectToStream"]>[0]) {
-    return this.createCurrentTransport().reconnectToStream(options)
+    return this.createCurrentTransport("chat").reconnectToStream(options)
   }
 
-  private createCurrentTransport(): ChatTransport<BizUIMessage> {
-    if (getLocalAIProfileId("chat")) {
-      return this.options.createLocalTransport()
+  private createCurrentTransport(feature: LocalAIFeature): ChatTransport<BizUIMessage> {
+    if (getLocalAIProfileId(feature)) {
+      return this.options.createLocalTransport(feature)
     }
 
     return this.options.createCloudTransport()
   }
 }
+
+const LOCAL_AI_FEATURES = new Set<LocalAIFeature>([
+  "chat",
+  "summary",
+  "translation",
+  "timelineSummary",
+  "timelineRanking",
+  "onboardingRecommendations",
+  "tts",
+  "tasks",
+  "mcp",
+])
+
+const resolveLocalAITransportFeature = (
+  options: Parameters<ChatTransport<BizUIMessage>["sendMessages"]>[0],
+): LocalAIFeature => {
+  const { body } = options
+  if (isRecord(body) && typeof body.localAIFeature === "string") {
+    const feature = body.localAIFeature
+    if (LOCAL_AI_FEATURES.has(feature as LocalAIFeature)) {
+      return feature as LocalAIFeature
+    }
+  }
+
+  return "chat"
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
 
 const createCloudChatTransport = ({ onValue, titleHandler }: CreateChatTransportOptions = {}) =>
   new ExtendChatTransport({

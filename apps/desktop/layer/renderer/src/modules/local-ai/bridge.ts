@@ -338,7 +338,7 @@ const usageFromTextResult = (result: DesktopLocalAITextResult): LocalAIUsage | u
       }
 
 const parseTranslationRecord = (text: string): Record<string, LocalAITranslationResult | null> => {
-  const parsed: unknown = JSON.parse(text)
+  const parsed: unknown = JSON.parse(extractJsonObjectText(text))
   if (!isRecord(parsed)) return {}
 
   const entries: Array<[string, LocalAITranslationResult | null]> = []
@@ -352,6 +352,34 @@ const parseTranslationRecord = (text: string): Record<string, LocalAITranslation
     }
   }
   return Object.fromEntries(entries)
+}
+
+const extractJsonObjectText = (text: string): string => {
+  const trimmed = text.trim()
+  const fencedJson = extractFencedCodeBlock(trimmed)
+  if (fencedJson) return fencedJson
+
+  const startIndex = trimmed.indexOf("{")
+  const endIndex = trimmed.lastIndexOf("}")
+  if (startIndex !== -1 && endIndex > startIndex) {
+    return trimmed.slice(startIndex, endIndex + 1)
+  }
+
+  return trimmed
+}
+
+const extractFencedCodeBlock = (text: string): string | null => {
+  if (!text.startsWith("```")) return null
+
+  const lines = text.split("\n")
+  if (lines.length < 3) return null
+
+  const firstLine = lines[0]?.trim().toLowerCase()
+  const lastLine = lines.at(-1)?.trim()
+  if (firstLine !== "```" && firstLine !== "```json") return null
+  if (lastLine !== "```") return null
+
+  return lines.slice(1, -1).join("\n").trim()
 }
 
 const isTranslationResult = (value: unknown): value is LocalAITranslationResult => {

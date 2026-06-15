@@ -40,6 +40,7 @@ type LocalAICompleteTextInput = {
 }
 
 type LocalAIChatStreamInput = {
+  feature?: LocalAIFeature
   maxTokens?: number
   messages: LocalAIChatMessage[]
   model: string
@@ -252,6 +253,7 @@ export class LocalAIService extends IpcService {
     abortSignal: AbortSignal,
   ): Promise<void> {
     let apiKey: string | null = null
+    const feature = input.feature ?? "chat"
 
     try {
       const resolved = resolveProfile(input.profileId)
@@ -271,7 +273,7 @@ export class LocalAIService extends IpcService {
       })
 
       recordUsage({
-        feature: "chat",
+        feature,
         model: input.model,
         ok: true,
         profileId: input.profileId,
@@ -282,7 +284,7 @@ export class LocalAIService extends IpcService {
       const message = sanitizeErrorMessage(error, apiKey)
       recordUsage({
         errorMessage: message,
-        feature: "chat",
+        feature,
         model: input.model,
         ok: false,
         profileId: input.profileId,

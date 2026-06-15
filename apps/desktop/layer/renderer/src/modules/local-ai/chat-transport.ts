@@ -1,3 +1,4 @@
+import type { LocalAIFeature } from "@follow/shared/settings/interface"
 import { getEntry } from "@follow/store/entry/getter"
 import type { ChatTransport, UIMessageChunk } from "ai"
 
@@ -19,6 +20,7 @@ import {
 
 type LocalAIChatTransportOptions = {
   createCloudTransport: () => ChatTransport<BizUIMessage>
+  feature?: LocalAIFeature
   onValue?: (value: UIMessageChunk) => void
 }
 
@@ -29,6 +31,7 @@ type LocalChatRequest = {
   model: string
   profile: DesktopLocalAIProfile
   profileId: string
+  feature: LocalAIFeature
 }
 
 type LocalAIChatDeltaPayload = {
@@ -85,13 +88,17 @@ class LocalAIChatTransport implements ChatTransport<BizUIMessage> {
       throw new LocalAIChatSetupError("Local AI IPC is unavailable")
     }
 
-    const request = await createLocalChatRequest(localAIIPC, messages)
+    const request = await createLocalChatRequest(
+      localAIIPC,
+      messages,
+      this.options.feature ?? "chat",
+    )
 
     if (!request.profile.supportsStreaming) {
       return createCompleteTextChunkStream({
         abortSignal,
         input: {
-          feature: "chat",
+          feature: request.feature,
           messages: request.messages,
           model: request.model,
           profileId: request.profileId,
@@ -106,6 +113,7 @@ class LocalAIChatTransport implements ChatTransport<BizUIMessage> {
     }
 
     const { streamId } = await startLocalChatStream(localAIIPC, {
+      feature: request.feature,
       messages: request.messages,
       model: request.model,
       profileId: request.profileId,
@@ -123,11 +131,12 @@ class LocalAIChatTransport implements ChatTransport<BizUIMessage> {
 const createLocalChatRequest = async (
   localAIIPC: DesktopLocalAIIPC,
   messages: BizUIMessage[],
+  feature: LocalAIFeature,
 ): Promise<LocalChatRequest> => {
   const settings = getAISettings().localAI
-  const profileId = resolveLocalAIProfileId(settings, "chat")
+  const profileId = resolveLocalAIProfileId(settings, feature)
   if (!profileId) {
-    throw new LocalAIChatSetupError("Local AI profile is not configured for chat")
+    throw new LocalAIChatSetupError(`Local AI profile is not configured for ${feature}`)
   }
 
   const profiles = await listProfilesForChat(localAIIPC)
@@ -143,7 +152,7 @@ const createLocalChatRequest = async (
 
   let defaultModel: string
   try {
-    defaultModel = resolveLocalAIProfileModel(profile, "chat")
+    defaultModel = resolveLocalAIProfileModel(profile, resolveLocalChatModelPurpose(feature))
   } catch (error) {
     throw toSetupError(error)
   }
@@ -154,11 +163,17 @@ const createLocalChatRequest = async (
 
   return {
     messages: buildLocalChatMessages(messages),
+    feature,
     model,
     profile,
     profileId,
   }
 }
+
+const resolveLocalChatModelPurpose = (
+  feature: LocalAIFeature,
+): Parameters<typeof resolveLocalAIProfileModel>[1] =>
+  feature === "timelineSummary" || feature === "timelineRanking" ? "timeline" : "chat"
 
 const createAvailableModels = (profile: DesktopLocalAIProfile, defaultModel: string): string[] => [
   ...new Set([defaultModel, ...profile.models]),

@@ -4,6 +4,7 @@ import { createDesktopLocalAIBridge } from "./bridge"
 import type { DesktopLocalAIProfile, DesktopLocalAIStoredProfile } from "./hooks"
 
 const mocks = vi.hoisted(() => ({
+  completeText: vi.fn(),
   listProfiles: vi.fn(),
   upsertProfile: vi.fn(),
 }))
@@ -15,6 +16,7 @@ vi.mock("~/atoms/settings/ai", () => ({
 vi.mock("./hooks", () => ({
   assertLocalAIProfileEnabled: vi.fn(),
   getLocalAIIPC: () => ({
+    completeText: mocks.completeText,
     listProfiles: mocks.listProfiles,
     upsertProfile: mocks.upsertProfile,
   }),
@@ -139,5 +141,58 @@ describe("createDesktopLocalAIBridge saveProfile", () => {
         models: ["chat-model", "discovered-model", "new-chat-model"],
       }),
     )
+  })
+})
+
+describe("createDesktopLocalAIBridge translateEntries", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.listProfiles.mockResolvedValue([existingProfile])
+  })
+
+  it("parses translation JSON wrapped in a fenced code block", async () => {
+    mocks.completeText.mockResolvedValue({
+      text: [
+        "```json",
+        JSON.stringify({
+          "entry-1": {
+            content: "正文",
+            description: "描述",
+            readabilityContent: null,
+            title: "标题",
+          },
+        }),
+        "```",
+      ].join("\n"),
+      totalTokens: 12,
+    })
+    const bridge = createDesktopLocalAIBridge()
+
+    await expect(
+      bridge.translateEntries({
+        fields: "title,description,content",
+        items: [
+          {
+            content: "Content",
+            description: "Description",
+            entryId: "entry-1",
+            readabilityContent: null,
+            title: "Title",
+          },
+        ],
+        language: "zh-CN",
+        mode: "translation-only",
+        model: "translation-model",
+        profileId: "profile-1",
+      }),
+    ).resolves.toEqual({
+      "entry-1": {
+        content: "正文",
+        description: "描述",
+        entryId: "entry-1",
+        readabilityContent: null,
+        title: "标题",
+      },
+    })
   })
 })

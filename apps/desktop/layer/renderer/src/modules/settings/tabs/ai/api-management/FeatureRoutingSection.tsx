@@ -23,6 +23,14 @@ const FEATURES: LocalAIFeature[] = [
   "mcp",
 ]
 
+const LOCAL_RUNTIME_FEATURES = new Set<LocalAIFeature>([
+  "chat",
+  "summary",
+  "translation",
+  "timelineSummary",
+  "tts",
+])
+
 export const FeatureRoutingSection = () => {
   const { t } = useTranslation("ai")
   const { localAI } = useAISettingValue()
@@ -51,35 +59,50 @@ export const FeatureRoutingSection = () => {
       </div>
 
       <div className="space-y-2">
-        {FEATURES.map((feature) => (
-          <div
-            key={feature}
-            className="flex items-center justify-between gap-4 rounded-lg border border-fill-secondary p-3"
-          >
-            <div>
-              <div className="text-sm font-medium text-text">
-                {t(`api_management.features.${feature}`)}
-              </div>
-              <div className="text-xs text-text-secondary">
-                {t(`api_management.features.${feature}_description`)}
-              </div>
-            </div>
-            <Select
-              value={localAI.featureRouting[feature]}
-              onValueChange={(value) => updateFeatureMode(feature, value as LocalAIMode)}
+        {FEATURES.map((feature) => {
+          const isLocalRuntimeFeature = LOCAL_RUNTIME_FEATURES.has(feature)
+
+          return (
+            <div
+              key={feature}
+              className="flex items-center justify-between gap-4 rounded-lg border border-fill-secondary p-3"
             >
-              <SelectTrigger className="w-[140px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="cloud">{t("api_management.routing.cloud")}</SelectItem>
-                <SelectItem value="local" disabled={!hasDefaultProfile}>
-                  {t("api_management.routing.local")}
-                </SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        ))}
+              <div className="min-w-0">
+                <div className="flex items-center gap-2 text-sm font-medium text-text">
+                  <span>{t(`api_management.features.${feature}`)}</span>
+                  <span
+                    className={
+                      isLocalRuntimeFeature
+                        ? "rounded-full bg-green/10 px-2 py-0.5 text-[10px] font-medium text-green"
+                        : "rounded-full bg-fill-secondary px-2 py-0.5 text-[10px] font-medium text-text-secondary"
+                    }
+                  >
+                    {isLocalRuntimeFeature
+                      ? t("api_management.routing.local_ready")
+                      : t("api_management.routing.cloud_managed")}
+                  </span>
+                </div>
+                <div className="text-xs text-text-secondary">
+                  {t(`api_management.features.${feature}_description`)}
+                </div>
+              </div>
+              <Select
+                value={localAI.featureRouting[feature]}
+                onValueChange={(value) => updateFeatureMode(feature, value as LocalAIMode)}
+              >
+                <SelectTrigger className="w-[140px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="cloud">{t("api_management.routing.cloud")}</SelectItem>
+                  <SelectItem value="local" disabled={!hasDefaultProfile || !isLocalRuntimeFeature}>
+                    {t("api_management.routing.local")}
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          )
+        })}
       </div>
     </div>
   )

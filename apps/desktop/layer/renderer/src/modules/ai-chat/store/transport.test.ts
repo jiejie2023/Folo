@@ -88,4 +88,27 @@ describe("createChatTransport", () => {
     expect(mocks.cloudSendMessages).toHaveBeenCalledTimes(2)
     expect(mocks.localSendMessages).toHaveBeenCalledTimes(1)
   })
+
+  it("routes timeline summary sends using the timelineSummary local AI setting", async () => {
+    const cloudStream = new ReadableStream()
+    const localStream = new ReadableStream()
+    mocks.cloudSendMessages.mockResolvedValue(cloudStream)
+    mocks.localSendMessages.mockResolvedValue(localStream)
+    mocks.getLocalAIProfileId.mockImplementation((feature) =>
+      feature === "timelineSummary" ? "profile-1" : null,
+    )
+
+    const transport = createChatTransport()
+    const options = {
+      ...createSendOptions(),
+      body: {
+        localAIFeature: "timelineSummary",
+      },
+    }
+
+    await expect(transport.sendMessages(options)).resolves.toBe(localStream)
+
+    expect(mocks.getLocalAIProfileId).toHaveBeenCalledWith("timelineSummary")
+    expect(mocks.cloudSendMessages).not.toHaveBeenCalled()
+  })
 })
