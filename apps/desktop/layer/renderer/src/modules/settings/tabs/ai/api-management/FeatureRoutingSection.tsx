@@ -10,6 +10,7 @@ import type { LocalAIFeature, LocalAIMode } from "@follow/shared/settings/interf
 import { useTranslation } from "react-i18next"
 
 import { getAISettings, setAISetting, useAISettingValue } from "~/atoms/settings/ai"
+import { canRouteLocalAIFeature, resolveLocalAIMode } from "~/modules/local-ai/hooks"
 
 const FEATURES: LocalAIFeature[] = [
   "chat",
@@ -22,14 +23,6 @@ const FEATURES: LocalAIFeature[] = [
   "tasks",
   "mcp",
 ]
-
-const LOCAL_RUNTIME_FEATURES = new Set<LocalAIFeature>([
-  "chat",
-  "summary",
-  "translation",
-  "timelineSummary",
-  "tts",
-])
 
 export const FeatureRoutingSection = () => {
   const { t } = useTranslation("ai")
@@ -60,7 +53,8 @@ export const FeatureRoutingSection = () => {
 
       <div className="space-y-2">
         {FEATURES.map((feature) => {
-          const isLocalRuntimeFeature = LOCAL_RUNTIME_FEATURES.has(feature)
+          const isLocalRuntimeFeature = canRouteLocalAIFeature(feature)
+          const resolvedMode = resolveLocalAIMode(localAI, feature)
 
           return (
             <div
@@ -87,7 +81,7 @@ export const FeatureRoutingSection = () => {
                 </div>
               </div>
               <Select
-                value={localAI.featureRouting[feature]}
+                value={resolvedMode}
                 onValueChange={(value) => updateFeatureMode(feature, value as LocalAIMode)}
               >
                 <SelectTrigger className="w-[140px]">

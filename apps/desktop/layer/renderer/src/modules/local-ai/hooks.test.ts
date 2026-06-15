@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest"
 import {
   assertLocalAIProfileEnabled,
   clearDeletedLocalAIDefaultProfile,
+  resolveLocalAIMode,
   resolveLocalAIProfileApiKey,
   resolveLocalAIProfileId,
   resolveLocalAIProfileModel,
@@ -29,6 +30,18 @@ const createSettings = (overrides: Partial<LocalAISettings> = {}): LocalAISettin
 })
 
 describe("resolveLocalAIProfileId", () => {
+  test("treats cloud-managed features as cloud even when old settings route them locally", () => {
+    const settings = createSettings({
+      featureRouting: {
+        ...createSettings().featureRouting,
+        timelineRanking: "local",
+      },
+    })
+
+    expect(resolveLocalAIMode(settings, "timelineRanking")).toBe("cloud")
+    expect(resolveLocalAIProfileId(settings, "timelineRanking")).toBeNull()
+  })
+
   test("returns the default profile id when local AI is enabled and the feature routes locally", () => {
     expect(resolveLocalAIProfileId(createSettings(), "summary")).toBe("profile-1")
   })

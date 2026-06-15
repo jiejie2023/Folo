@@ -132,10 +132,25 @@ export const localAIQueryKeys = {
   usage: (limit?: number) => ["localAI", "usage", limit ?? "default"] as const,
 }
 
+const LOCAL_AI_RUNTIME_FEATURES = new Set<LocalAIFeature>([
+  "chat",
+  "summary",
+  "translation",
+  "timelineSummary",
+  "tts",
+])
+
+export const canRouteLocalAIFeature = (feature: LocalAIFeature): boolean =>
+  LOCAL_AI_RUNTIME_FEATURES.has(feature)
+
 export const resolveLocalAIMode = (
   settings: LocalAISettings,
   feature: LocalAIFeature,
-): "cloud" | "local" => settings.featureRouting[feature] ?? "cloud"
+): "cloud" | "local" => {
+  const configuredMode = settings.featureRouting[feature] ?? "cloud"
+  if (configuredMode === "local" && !canRouteLocalAIFeature(feature)) return "cloud"
+  return configuredMode
+}
 
 export const resolveLocalAIProfileId = (
   settings: LocalAISettings,
