@@ -6,7 +6,7 @@ import { toApiSupportedActionLanguage } from "@follow/shared"
 import { checkLanguage } from "@follow/utils/language"
 import { create, indexedResolver, windowScheduler } from "@yornaath/batshit"
 
-import { api } from "../../context"
+import { api, localAI } from "../../context"
 import type { Hydratable, Resetable } from "../../lib/base"
 import { createImmerSetter, createTransaction, createZustandStore } from "../../lib/helper"
 import { readNdjsonStream } from "../../lib/stream"
@@ -169,6 +169,58 @@ class TranslationSyncService {
           continue
         }
 
+        const localAIBridge = localAI()
+        if (localAIBridge?.isFeatureEnabled("translation")) {
+          try {
+            const items = group.ids
+              .map(createLocalTranslationItem)
+              .filter((item): item is NonNullable<typeof item> => item !== null)
+
+            if (items.length === 0) {
+              for (const id of group.ids) {
+                const key = group.keyById[id]
+                if (key) results[key] = null
+              }
+              continue
+            }
+
+            const response = await localAIBridge.translateEntries({
+              fields: group.fields,
+              items,
+              language: group.language,
+              mode: group.mode,
+            })
+
+            for (const id of group.ids) {
+              const key = group.keyById[id]
+              if (!key) continue
+
+              const translated = response[id]
+              if (!translated) {
+                results[key] = null
+                continue
+              }
+
+              if (this.currentMode && this.currentMode !== group.mode) continue
+
+              const translation: TranslationModel = {
+                content: translated.content ?? null,
+                description: translated.description ?? null,
+                entryId: id,
+                language: group.language,
+                readabilityContent: translated.readabilityContent ?? null,
+                title: translated.title ?? null,
+              }
+
+              results[key] = translation
+              await translationActions.upsertMany([translation])
+            }
+          } catch (e) {
+            console.error("Local translation request failed:", e)
+          }
+          continue
+        }
+
         try {
           const request: TranslationBatchRequest & { mode?: TranslationMode } = {
             ids: group.ids,
@@ -231,8 +283,9 @@ class TranslationSyncService {
     mode?: TranslationMode
   }) {
     const userRole = useUserStore.getState().role
+    const isLocalTranslationEnabled = localAI()?.isFeatureEnabled("translation") ?? false
 
-    if (userRole === UserRole.Free) return null
+    if (userRole === UserRole.Free && !isLocalTranslationEnabled) return null
     const translationMode = mode ?? "bilingual"
     await this.ensureMode(translationMode)
 
@@ -264,3 +317,16 @@ class TranslationSyncService {
 }
 
 export const translationSyncService = new TranslationSyncService()
+
+const createLocalTranslationItem = (entryId: string) => {
+  const entry = getEntry(entryId)
+  if (!entry) return null
+
+  return {
+    content: entry.content ?? null,
+    description: entry.description ?? null,
+    entryId,
+    readabilityContent: entry.readabilityContent ?? null,
+    title: entry.title ?? null,
+  }
+}

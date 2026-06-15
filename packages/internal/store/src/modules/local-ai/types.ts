@@ -124,7 +124,7 @@ export interface LocalAITranslateEntriesInput {
   items: LocalAITranslationItem[]
   language: string
   fields: string
-  mode: "bilingual" | "translation"
+  mode: "bilingual" | "translation-only"
 }
 
 export interface LocalAITranslationResult {

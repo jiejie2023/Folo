@@ -423,7 +423,7 @@ describe("createLocalAIChatTransport", () => {
           }),
       ),
       listProfiles: vi.fn().mockResolvedValue([{ ...profile, supportsStreaming: false }]),
-      stopTextCompletion: vi.fn().mockResolvedValue(),
+      stopTextCompletion: vi.fn(async () => {}),
     })
     mocks.getLocalAIIPC.mockReturnValue(ipc)
     const transport = createTransport()
