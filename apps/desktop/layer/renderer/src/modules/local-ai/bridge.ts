@@ -5,9 +5,11 @@ import type {
   LocalAIChatCompletionResult,
   LocalAIProfile,
   LocalAIProfileInput,
+  LocalAIStreamTextResult,
   LocalAISummaryResult,
   LocalAITaskResult,
   LocalAIToolCallResult,
+  LocalAITranslateTextInput,
   LocalAITranslationResult,
   LocalAITTSResult,
   LocalAIUsage,
@@ -136,7 +138,7 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
       messages: [
         {
           content:
-            "Translate the requested entry fields. Respond with a strict JSON object keyed by entryId. Each value must include title, description, content, and readabilityContent with string or null values.",
+            "Translate the requested entry fields. Respond with a strict JSON object keyed by entryId. Each value must include title, description, content, and readabilityContent with string or null values. Return translated text only; do not include the original source text. The app handles bilingual display separately.",
           role: "system",
         },
         {
@@ -156,9 +158,41 @@ export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
     })
     try {
       return parseTranslationRecord(result.text)
-    } catch {
-      return {}
+    } catch (error) {
+      throw new Error("Local AI translation response was not valid JSON", { cause: error })
     }
+  },
+  async streamTranslateText(input) {
+    const profile = await resolveProfile(input.profileId, "translation")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "translation")
+    const messages = buildTranslationTextMessages(input)
+
+    if (!window.electron?.ipcRenderer) {
+      const result = await completeText({
+        feature: "translation",
+        messages,
+        model,
+        profileId: profile.id,
+        temperature: 0.1,
+      })
+      if (result.text) {
+        input.onDelta?.(result.text)
+      }
+      return {
+        text: result.text,
+        usage: usageFromTextResult(result),
+      } satisfies LocalAIStreamTextResult
+    }
+
+    return streamText({
+      feature: "translation",
+      forceStreaming: true,
+      messages,
+      model,
+      onDelta: input.onDelta,
+      profileId: profile.id,
+      temperature: 0.1,
+    })
   },
   async synthesizeSpeech(input) {
     const profile = await resolveProfile(input.profileId, "tts")
@@ -269,6 +303,152 @@ const upsertDesktopProfile = async (
 const completeText = async (
   input: DesktopLocalAICompleteTextInput,
 ): Promise<DesktopLocalAITextResult> => requireLocalAIIPC().completeText(input)
+
+type LocalAIStreamTextInput = {
+  feature: LocalAIFeature
+  firstDeltaTimeoutMs?: number
+  forceStreaming?: boolean
+  messages: DesktopLocalAICompleteTextInput["messages"]
+  model: string
+  onDelta?: (delta: string) => void
+  profileId: string
+  temperature?: number
+}
+
+type LocalAIChatDeltaPayload = {
+  delta: string
+  streamId: string
+}
+
+type LocalAIChatErrorPayload = {
+  message: string
+  streamId: string
+}
+
+type LocalAIChatFinishPayload = {
+  result?: DesktopLocalAITextResult
+  streamId: string
+}
+
+const streamText = async ({
+  feature,
+  firstDeltaTimeoutMs,
+  forceStreaming,
+  messages,
+  model,
+  onDelta,
+  profileId,
+  temperature,
+}: LocalAIStreamTextInput): Promise<LocalAIStreamTextResult> => {
+  const localAIIPC = requireLocalAIIPC()
+  const ipcRenderer = window.electron?.ipcRenderer
+  if (!ipcRenderer) {
+    throw new Error("Local AI IPC renderer is unavailable")
+  }
+
+  const { streamId } = await localAIIPC.startChatStream({
+    feature,
+    forceStreaming,
+    messages,
+    model,
+    profileId,
+    temperature,
+  })
+
+  return new Promise<LocalAIStreamTextResult>((resolve, reject) => {
+    const cleanups: Array<() => void> = []
+    let firstDeltaTimer: ReturnType<typeof setTimeout> | undefined
+    let text = ""
+    let settled = false
+
+    const clearFirstDeltaTimer = () => {
+      if (!firstDeltaTimer) return
+      clearTimeout(firstDeltaTimer)
+      firstDeltaTimer = undefined
+    }
+
+    const cleanup = () => {
+      clearFirstDeltaTimer()
+      for (const dispose of cleanups.splice(0)) {
+        dispose()
+      }
+    }
+
+    const settle = (handler: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      handler()
+    }
+
+    if (firstDeltaTimeoutMs && firstDeltaTimeoutMs > 0) {
+      firstDeltaTimer = setTimeout(() => {
+        settle(() => {
+          void Promise.resolve(localAIIPC.stopChatStream?.(streamId)).catch(() => {})
+          reject(new Error("Local AI stream timed out before the first token"))
+        })
+      }, firstDeltaTimeoutMs)
+    }
+
+    cleanups.push(
+      ipcRenderer.on("local-ai:chat-delta", (_event, payload: unknown) => {
+        if (!isDeltaPayload(payload, streamId)) return
+        clearFirstDeltaTimer()
+        text += payload.delta
+        onDelta?.(payload.delta)
+      }),
+      ipcRenderer.on("local-ai:chat-error", (_event, payload: unknown) => {
+        if (!isErrorPayload(payload, streamId)) return
+        settle(() => reject(new Error(payload.message)))
+      }),
+      ipcRenderer.on("local-ai:chat-finish", (_event, payload: unknown) => {
+        if (!isFinishPayload(payload, streamId)) return
+        const { result } = payload
+        settle(() =>
+          resolve({
+            text: result?.text ?? text,
+            usage: result ? usageFromTextResult(result) : undefined,
+          }),
+        )
+      }),
+    )
+  })
+}
+
+const buildTranslationTextMessages = (
+  input: LocalAITranslateTextInput,
+): DesktopLocalAICompleteTextInput["messages"] => [
+  {
+    content: [
+      "You are a precise translation engine for an RSS reader.",
+      "Return only the translated text.",
+      "Do not include explanations, markdown fences, labels, or the original text.",
+      "The app handles bilingual display by placing your translated text under the source; never output the source text yourself.",
+      "Preserve the original HTML or Markdown structure, tags, links, code blocks, and placeholders.",
+      "Keep names, URLs, code, commands, and inline identifiers unchanged unless they have a standard translation.",
+    ].join(" "),
+    role: "system",
+  },
+  {
+    content: [
+      `Target language: ${input.language}`,
+      `Field: ${input.field}`,
+      `Folo display mode, handled outside the model: ${input.mode}`,
+      "Text:",
+      input.content,
+    ].join("\n"),
+    role: "user",
+  },
+]
+
+const isDeltaPayload = (payload: unknown, streamId: string): payload is LocalAIChatDeltaPayload =>
+  isRecord(payload) && payload.streamId === streamId && typeof payload.delta === "string"
+
+const isErrorPayload = (payload: unknown, streamId: string): payload is LocalAIChatErrorPayload =>
+  isRecord(payload) && payload.streamId === streamId && typeof payload.message === "string"
+
+const isFinishPayload = (payload: unknown, streamId: string): payload is LocalAIChatFinishPayload =>
+  isRecord(payload) && payload.streamId === streamId
 
 const resolveProfile = async (
   profileId: string | null | undefined,

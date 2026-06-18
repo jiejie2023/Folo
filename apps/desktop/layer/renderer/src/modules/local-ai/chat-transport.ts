@@ -1,10 +1,13 @@
+import type { FeedViewType } from "@follow/constants"
 import type { LocalAIFeature } from "@follow/shared/settings/interface"
-import { getEntry } from "@follow/store/entry/getter"
+import { getEntry, getEntryIdsByFeedIds, getEntryIdsByView } from "@follow/store/entry/getter"
 import type { ChatTransport, UIMessageChunk } from "ai"
 
 import { getAISettings } from "~/atoms/settings/ai"
+import { getActionLanguage } from "~/atoms/settings/general"
 import { getAIModelState } from "~/modules/ai-chat/atoms/session"
-import type { BizUIMessage } from "~/modules/ai-chat/store/types"
+import type { AIChatContextBlock, BizUIMessage } from "~/modules/ai-chat/store/types"
+import { getAIOutputLanguageLabel } from "~/modules/ai-chat/utils/output-language"
 
 import type {
   DesktopLocalAICompleteTextInput,
@@ -56,6 +59,8 @@ type LocalAIChatFinishPayload = {
 const TEXT_PART_ID = "text-1"
 const MAX_CONTEXT_LENGTH = 4000
 const MAX_DESCRIPTION_LENGTH = 1000
+const MAX_TIMELINE_CONTEXT_ENTRIES = 20
+const MAX_TIMELINE_ENTRY_CONTENT_LENGTH = 1200
 const DEFAULT_SYSTEM_PROMPT = "You are Folo AI, an RSS reading assistant."
 
 export const createLocalAIChatTransport = (
@@ -252,8 +257,10 @@ const buildLocalChatMessages = (
 
 const buildSystemPrompt = (entryContext: string | null): string => {
   const personalizePrompt = getAISettings().personalizePrompt?.trim()
+  const actionLanguage = getActionLanguage()
   return [
     DEFAULT_SYSTEM_PROMPT,
+    `Output language: ${getAIOutputLanguageLabel(actionLanguage)}. Always answer in this language unless the user explicitly asks for another language.`,
     personalizePrompt ? `User preference:\n${personalizePrompt}` : null,
     entryContext,
   ]
@@ -285,10 +292,15 @@ const extractMessageText = (message: BizUIMessage): string => {
 
 const buildEntryContext = (messages: BizUIMessage[]): string | null => {
   const entryIds = new Set<string>()
+  const timelineEntryIds = new Set<string>()
 
   for (const message of messages) {
     for (const part of message.parts) {
       if (part.type !== "data-block") continue
+
+      for (const entryId of resolveTimelineEntryIds(part.data)) {
+        timelineEntryIds.add(entryId)
+      }
 
       for (const block of part.data) {
         if (block.type === "mainEntry" && block.value.trim()) {
@@ -298,7 +310,7 @@ const buildEntryContext = (messages: BizUIMessage[]): string | null => {
     }
   }
 
-  const contexts = Array.from(entryIds)
+  const entryContexts = Array.from(entryIds)
     .map((entryId) => {
       const entry = getEntry(entryId)
       if (!entry) return null
@@ -320,18 +332,118 @@ const buildEntryContext = (messages: BizUIMessage[]): string | null => {
     })
     .filter(Boolean)
 
-  if (contexts.length === 0) return null
+  const timelineContexts = Array.from(timelineEntryIds)
+    .filter((entryId) => !entryIds.has(entryId))
+    .slice(0, MAX_TIMELINE_CONTEXT_ENTRIES)
+    .map((entryId) => {
+      const entry = getEntry(entryId)
+      if (!entry) return null
 
-  return [
-    "Current entry context is provided by Folo. Use it when answering the user's question.",
-    ...contexts,
-  ].join("\n\n")
+      const lines = [
+        `Entry ID: ${entryId}`,
+        entry.title ? `Title: ${entry.title}` : null,
+        entry.url ? `URL: ${entry.url}` : null,
+        entry.feedId ? `Feed ID: ${entry.feedId}` : null,
+        entry.publishedAt ? `Published At: ${formatDateForPrompt(entry.publishedAt)}` : null,
+        entry.description
+          ? `Description: ${truncateText(entry.description, MAX_DESCRIPTION_LENGTH)}`
+          : null,
+        entry.content
+          ? `Content: ${truncateText(entry.content, MAX_TIMELINE_ENTRY_CONTENT_LENGTH)}`
+          : null,
+        entry.readabilityContent
+          ? `Readable Content: ${truncateText(
+              entry.readabilityContent,
+              MAX_TIMELINE_ENTRY_CONTENT_LENGTH,
+            )}`
+          : null,
+      ].filter(Boolean)
+
+      return lines.join("\n")
+    })
+    .filter(Boolean)
+
+  const sections: string[] = []
+
+  if (entryContexts.length > 0) {
+    sections.push(
+      [
+        "Current entry context is provided by Folo. Use it when answering the user's question.",
+        ...entryContexts,
+      ].join("\n\n"),
+    )
+  }
+
+  if (timelineContexts.length > 0) {
+    sections.push(
+      [
+        "Current timeline context is provided by Folo. Use these RSS entries when summarizing the timeline. Do not claim that the timeline is unavailable when entries are listed below.",
+        ...timelineContexts,
+      ].join("\n\n"),
+    )
+  }
+
+  return sections.length > 0 ? sections.join("\n\n") : null
+}
+
+const resolveTimelineEntryIds = (blocks: AIChatContextBlock[]): string[] => {
+  let explicitEntryIds: string[] = []
+  let view: FeedViewType | null = null
+  let feedIds: string[] = []
+  let unreadOnly = false
+
+  for (const block of blocks) {
+    if (block.type === "timelineEntries") {
+      explicitEntryIds = block.value
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+    }
+
+    if (block.type === "mainView") {
+      const parsedView = Number(block.value)
+      if (Number.isFinite(parsedView)) {
+        view = parsedView as FeedViewType
+      }
+    }
+
+    if (block.type === "mainFeed") {
+      feedIds = block.value
+        .split(",")
+        .map((id) => id.trim())
+        .filter(Boolean)
+    }
+
+    if (block.type === "unreadOnly") {
+      unreadOnly = block.value === "true"
+    }
+  }
+
+  const entryIds =
+    explicitEntryIds.length > 0
+      ? explicitEntryIds
+      : feedIds.length > 0
+        ? getEntryIdsByFeedIds(feedIds)
+        : view !== null
+          ? getEntryIdsByView(view, false)
+          : null
+
+  return (entryIds ?? []).filter((entryId) => {
+    const entry = getEntry(entryId)
+    if (!entry) return false
+    return !unreadOnly || entry.read === false
+  })
 }
 
 const truncateText = (text: string, maxLength: number): string => {
   const normalized = text.trim()
   if (normalized.length <= maxLength) return normalized
   return `${normalized.slice(0, maxLength)}...`
+}
+
+const formatDateForPrompt = (date: Date | string): string => {
+  if (date instanceof Date) return date.toISOString()
+  return date
 }
 
 const createCompleteTextChunkStream = ({

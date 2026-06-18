@@ -15,6 +15,8 @@ import { toast } from "sonner"
 import { z } from "zod"
 
 import { oneTimeToken } from "~/lib/auth"
+import { getAuthTokenFromResult } from "~/lib/auth-token"
+import { setAuthSessionToken } from "~/lib/client-session"
 import { handleSessionChanges } from "~/queries/auth"
 
 const formSchema = z.object({
@@ -42,7 +44,11 @@ export const TokenModalContent = () => {
       } else if (inputToken.startsWith("auth?token=")) {
         token = inputToken.slice("auth?token=".length)
       }
-      await oneTimeToken.apply({ token })
+      const result = await oneTimeToken.apply({ token })
+      const authToken = getAuthTokenFromResult(result)
+      if (authToken) {
+        setAuthSessionToken(authToken)
+      }
       handleSessionChanges()
     } catch (e) {
       console.error("Failed to apply one-time token:", e)

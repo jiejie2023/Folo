@@ -1,5 +1,5 @@
-import type { AISettings } from "@follow/shared/settings/interface"
 import { defaultAISettings } from "@follow/shared/settings/defaults"
+import type { AISettings } from "@follow/shared/settings/interface"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import type { DesktopLocalAIProfile } from "~/modules/local-ai/hooks"

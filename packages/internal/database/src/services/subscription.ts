@@ -27,6 +27,7 @@ class SubscriptionServiceStatic implements Resetable {
           feedId: sql`excluded.feed_id`,
           isPrivate: sql`excluded.is_private`,
           source: sql`excluded.source`,
+          synced: sql`excluded.synced`,
           title: sql`excluded.title`,
           userId: sql`excluded.user_id`,
           view: sql`excluded.view`,

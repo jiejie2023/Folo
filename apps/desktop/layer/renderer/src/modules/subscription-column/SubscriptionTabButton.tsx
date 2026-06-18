@@ -1,7 +1,8 @@
 import { useDroppable } from "@dnd-kit/core"
 import { ActionButton } from "@follow/components/ui/button/index.js"
 import { FeedViewType, getView } from "@follow/constants"
-import { useUnreadByView } from "@follow/store/unread/hooks"
+import { useSyncedFeedIds } from "@follow/store/subscription/hooks"
+import { useUnreadByIds, useUnreadByView } from "@follow/store/unread/hooks"
 import { cn } from "@follow/utils/utils"
 import type { FC } from "react"
 import { startTransition, useCallback } from "react"
@@ -10,6 +11,7 @@ import { useTranslation } from "react-i18next"
 import { MenuItemText, useShowContextMenu } from "~/atoms/context-menu"
 import { setUISetting, useUISettingKey } from "~/atoms/settings/ui"
 import { FocusablePresets } from "~/components/common/Focusable"
+import { ROUTE_TIMELINE_SYNCED } from "~/constants"
 import { useNavigateEntry } from "~/hooks/biz/useNavigateEntry"
 import { parseView, useRouteParamsSelector } from "~/hooks/biz/useRouteParams"
 import { useTimelineList } from "~/hooks/biz/useTimelineList"
@@ -49,7 +51,9 @@ export function SubscriptionTabButton({
 
   const view = parseView(timelineId)
 
-  if (view === FeedViewType.All) {
+  if (timelineId === ROUTE_TIMELINE_SYNCED) {
+    return <SyncedSwitchButton isActive={isActive} setActive={setActive} shortcut={shortcut} />
+  } else if (view === FeedViewType.All) {
     return (
       <ViewAllSwitchButton
         timelineId={timelineId}
@@ -71,6 +75,52 @@ export function SubscriptionTabButton({
       />
     )
   }
+}
+
+const SyncedSwitchButton: FC<{
+  isActive: boolean
+  setActive: () => void
+  shortcut: string
+}> = ({ isActive, setActive, shortcut }) => {
+  const { t } = useTranslation()
+  const syncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const syncedUnread = useUnreadByIds(syncedFeedIds)
+  const showSidebarUnreadCount = useUISettingKey("sidebarShowUnreadCount")
+
+  return (
+    <ActionButton
+      data-testid="timeline-tab-synced"
+      aria-pressed={isActive}
+      shortcutScope={FocusablePresets.isNotFloatingLayerScope}
+      tooltip={t("subscription_source.synced")}
+      shortcut={shortcut}
+      className={cn(
+        isActive && "bg-blue/10 text-blue",
+        "flex h-11 w-8 shrink-0 grow flex-col items-center gap-1 text-[1.375rem]",
+        ELECTRON ? "hover:!bg-theme-item-hover" : "",
+      )}
+      onClick={(event) => {
+        startTransition(() => {
+          setActive()
+        })
+        event.stopPropagation()
+      }}
+    >
+      <i className="i-mgc-user-3-cute-re" />
+      {showSidebarUnreadCount ? (
+        <div className="text-[0.625rem] font-medium leading-none">
+          {syncedUnread > 99 ? <span className="-mr-0.5">99+</span> : syncedUnread}
+        </div>
+      ) : (
+        <i
+          className={cn(
+            "i-mgc-round-cute-fi text-[0.25rem]",
+            syncedUnread > 0 ? (isActive ? "opacity-100" : "opacity-60") : "opacity-0",
+          )}
+        />
+      )}
+    </ActionButton>
+  )
 }
 
 const useSubscriptionTabContextMenu = ({

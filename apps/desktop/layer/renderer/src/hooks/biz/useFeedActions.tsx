@@ -8,11 +8,14 @@ import { useListById, useOwnedListByView } from "@follow/store/list/hooks"
 import { listSyncServices } from "@follow/store/list/store"
 import {
   useCategoriesByView,
+  useIsFeedSynced,
   useSubscriptionByFeedId,
   useSubscriptionsByFeedIds,
 } from "@follow/store/subscription/hooks"
+import { isLocalSubscription } from "@follow/store/subscription/source"
 import { unreadSyncService } from "@follow/store/unread/store"
 import { whoami } from "@follow/store/user/getters"
+import { useIsLoggedIn } from "@follow/store/user/hooks"
 import { isBizId } from "@follow/utils/utils"
 import { useMutation } from "@tanstack/react-query"
 import { useMemo } from "react"
@@ -35,7 +38,11 @@ import { useCategoryCreationModal } from "~/modules/settings/tabs/lists/hooks"
 import { ListCreationModalContent } from "~/modules/settings/tabs/lists/modals"
 import { useResetFeed } from "~/queries/feed"
 
-import { useBatchUpdateSubscription, useDeleteSubscription } from "./useSubscriptionActions"
+import {
+  useBatchUpdateSubscription,
+  useDeleteSubscription,
+  useSyncLocalSubscriptionToAccount,
+} from "./useSubscriptionActions"
 
 export const useFeedActions = ({
   feedId,
@@ -62,6 +69,8 @@ export const useFeedActions = ({
   const inbox = useInboxById(feedId)
   const isInbox = !!inbox
   const subscription = useSubscriptionByFeedId(feedId)
+  const isSynced = useIsFeedSynced(feedId)
+  const isLoggedIn = useIsLoggedIn()
 
   const subscriptions = useSubscriptionsByFeedIds(
     useMemo(() => feedIds || [feedId], [feedId, feedIds]),
@@ -77,6 +86,7 @@ export const useFeedActions = ({
   const { mutateAsync: removeFeedFromListMutation } = useRemoveFeedFromFeedList()
   const { mutateAsync: resetFeed } = useResetFeed()
   const { mutate: addFeedsToCategoryMutation } = useBatchUpdateSubscription()
+  const syncLocalSubscriptionToAccount = useSyncLocalSubscriptionToAccount()
   const presentCategoryCreationModal = useCategoryCreationModal()
 
   const listByView = useOwnedListByView(view!)
@@ -91,6 +101,12 @@ export const useFeedActions = ({
     if (!related) return []
 
     const isFeedOwner = related.ownerUserId === whoami()?.id
+    const selectedSubscriptions = isMultipleSelection ? subscriptions : [subscription]
+    const requiresAccountSubscriptionMutation =
+      isLoggedIn &&
+      selectedSubscriptions.some((subscription) => {
+        return !subscription || !isLocalSubscription(subscription)
+      })
 
     const items: MenuItemInput[] = [
       new MenuItemText({
@@ -113,7 +129,7 @@ export const useFeedActions = ({
             content: ({ dismiss }) => <FeedForm id={feedId} onSuccess={dismiss} />,
           })
         },
-        requiresLogin: true,
+        requiresLogin: requiresAccountSubscriptionMutation,
       }),
       new MenuItemText({
         label: isMultipleSelection
@@ -130,6 +146,17 @@ export const useFeedActions = ({
             return
           }
           deleteSubscription.mutate({ subscription })
+        },
+        requiresLogin: requiresAccountSubscriptionMutation,
+      }),
+      new MenuItemText({
+        label: t("subscription_source.sync_to_account"),
+        icon: <i className="i-mgc-cloud-cute-re" />,
+        disabled: syncLocalSubscriptionToAccount.isPending,
+        hide:
+          isMultipleSelection || !subscription || !isLocalSubscription(subscription) || isSynced,
+        click: () => {
+          syncLocalSubscriptionToAccount.mutate(feedId)
         },
         requiresLogin: true,
       }),
@@ -187,7 +214,7 @@ export const useFeedActions = ({
         label: t("sidebar.feed_column.context_menu.add_feeds_to_category"),
         disabled: isInbox,
         supportMultipleSelection: true,
-        requiresLogin: true,
+        requiresLogin: requiresAccountSubscriptionMutation,
         submenu: [
           ...Array.from(categories.values()).map((category) => {
             const isIncluded = isMultipleSelection
@@ -203,7 +230,7 @@ export const useFeedActions = ({
                   view: view!,
                 })
               },
-              requiresLogin: true,
+              requiresLogin: requiresAccountSubscriptionMutation,
             })
           }),
           listByView.length > 0 && MenuItemSeparator.default,
@@ -213,7 +240,7 @@ export const useFeedActions = ({
             click() {
               presentCategoryCreationModal(view!, isMultipleSelection ? feedIds : [feedId])
             },
-            requiresLogin: true,
+            requiresLogin: requiresAccountSubscriptionMutation,
           }),
         ],
       }),
@@ -300,7 +327,9 @@ export const useFeedActions = ({
     inbox,
     isEntryList,
     isInbox,
+    isLoggedIn,
     isMultipleSelection,
+    isSynced,
     listByView,
     present,
     presentCategoryCreationModal,
@@ -308,6 +337,7 @@ export const useFeedActions = ({
     removeFeedFromListMutation,
     resetFeed,
     shortcuts,
+    syncLocalSubscriptionToAccount,
     subscription,
     subscriptions,
     t,
@@ -321,6 +351,7 @@ export const useListActions = ({ listId, view }: { listId: string; view?: FeedVi
   const { t } = useTranslation()
   const list = useListById(listId)
   const subscription = useSubscriptionByFeedId(listId)!
+  const isLoggedIn = useIsLoggedIn()
 
   const { present } = useModalStack()
   const { mutateAsync: deleteSubscription } = useDeleteSubscription({})
@@ -329,6 +360,9 @@ export const useListActions = ({ listId, view }: { listId: string; view?: FeedVi
 
   const items = useMemo(() => {
     if (!list) return []
+
+    const requiresAccountSubscriptionMutation =
+      isLoggedIn && (!subscription || !isLocalSubscription(subscription))
 
     const items: MenuItemInput[] = [
       new MenuItemText({
@@ -349,13 +383,13 @@ export const useListActions = ({ listId, view }: { listId: string; view?: FeedVi
             content: ({ dismiss }) => <ListForm id={listId} onSuccess={dismiss} />,
           })
         },
-        requiresLogin: true,
+        requiresLogin: requiresAccountSubscriptionMutation,
       }),
       new MenuItemText({
         label: t("sidebar.feed_actions.unfollow"),
         shortcut: "$mod+Backspace",
         click: () => deleteSubscription({ subscription }),
-        requiresLogin: true,
+        requiresLogin: requiresAccountSubscriptionMutation,
       }),
       MenuItemSeparator.default,
       ...(list.ownerUserId === whoami()?.id
@@ -392,7 +426,7 @@ export const useListActions = ({ listId, view }: { listId: string; view?: FeedVi
     ]
 
     return items
-  }, [list, t, shortcuts, listId, present, deleteSubscription, subscription, view])
+  }, [isLoggedIn, list, t, shortcuts, listId, present, deleteSubscription, subscription, view])
 
   return items
 }

@@ -1,6 +1,8 @@
 import { Kbd } from "@follow/components/ui/kbd/Kbd.js"
+import { isLocalSubscription } from "@follow/store/subscription/source"
 import { subscriptionSyncService } from "@follow/store/subscription/store"
 import type { SubscriptionModel } from "@follow/store/subscription/types"
+import { whoami } from "@follow/store/user/getters"
 import { useMutation } from "@tanstack/react-query"
 import { useHotkeys } from "react-hotkeys-hook"
 import { Trans, useTranslation } from "react-i18next"
@@ -28,24 +30,45 @@ export const useDeleteSubscription = ({ onSuccess }: { onSuccess?: () => void } 
 
       if (!subscription) return
 
+      const shouldManageLocally = isLocalSubscription(subscription) || !whoami()
+
       subscriptionSyncService
         .unsubscribe([subscription.feedId, subscription.listId])
         .then(([feed]) => {
-          subscriptionSyncService.fetch()
+          if (!shouldManageLocally) {
+            subscriptionSyncService.fetch()
+          }
 
           if (!subscription) return
           if (!feed) return
           const undo = async () => {
-            await subscriptionSyncService.subscribe({
-              url: feed.type === "feed" ? feed.url : undefined,
-              listId: feed.type === "list" ? feed.id : undefined,
-              view: subscription.view,
-              category: subscription.category,
-              isPrivate: subscription.isPrivate,
-              feedId: feed.id,
-              title: feed.title,
-              hideFromTimeline: subscription.hideFromTimeline,
-            })
+            if (shouldManageLocally && feed.type === "feed") {
+              await subscriptionSyncService.subscribeLocal({
+                feed,
+                subscription: {
+                  url: feed.url,
+                  view: subscription.view,
+                  category: subscription.category,
+                  isPrivate: subscription.isPrivate,
+                  feedId: feed.id,
+                  listId: undefined,
+                  title: subscription.title,
+                  hideFromTimeline: subscription.hideFromTimeline,
+                },
+                entries: [],
+              })
+            } else {
+              await subscriptionSyncService.subscribe({
+                url: feed.type === "feed" ? feed.url : undefined,
+                listId: feed.type === "list" ? feed.id : undefined,
+                view: subscription.view,
+                category: subscription.category,
+                isPrivate: subscription.isPrivate,
+                feedId: feed.id,
+                title: feed.title,
+                hideFromTimeline: subscription.hideFromTimeline,
+              })
+            }
 
             toast.dismiss(toastId)
           }
@@ -116,6 +139,22 @@ export const useBatchUpdateSubscription = () => {
         feedIds: feedIdList,
         view,
       })
+    },
+  })
+}
+
+export const useSyncLocalSubscriptionToAccount = () => {
+  const { t } = useTranslation()
+
+  return useMutation({
+    mutationFn: async (feedId: string) => {
+      await subscriptionSyncService.syncLocalToCloud(feedId)
+    },
+    onSuccess: () => {
+      toast.success(t("subscription_source.sync_to_account_success"))
+    },
+    onError: () => {
+      toast.error(t("subscription_source.sync_to_account_error"))
     },
   })
 }

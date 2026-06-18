@@ -1,24 +1,25 @@
 import { convertLexicalToMarkdown } from "@follow/components/ui/lexical-rich-editor/utils.js"
-import { FeedViewType } from "@follow/constants"
 import { DEFAULT_SUMMARIZE_TIMELINE_SHORTCUT_ID } from "@follow/shared/settings/defaults"
-import { getCategoryFeedIds } from "@follow/store/subscription/getter"
 import type { LexicalEditor } from "lexical"
 import { $createParagraphNode, $getRoot, createEditor } from "lexical"
 import { nanoid } from "nanoid"
 import { useEffect, useMemo, useRef } from "react"
 
 import { getShortcutEffectivePrompt, useAISettingValue } from "~/atoms/settings/ai"
-import { useGeneralSettingKey } from "~/atoms/settings/general"
-import { ROUTE_FEED_IN_FOLDER, ROUTE_FEED_PENDING } from "~/constants"
+import { useActionLanguage, useGeneralSettingKey } from "~/atoms/settings/general"
+import { ROUTE_FEED_PENDING } from "~/constants"
 import { useRouteParamsSelector } from "~/hooks/biz/useRouteParams"
+import { resolveLocalAIProfileId } from "~/modules/local-ai/hooks"
 
 import { AI_CHAT_SPECIAL_ID_PREFIX } from "../constants"
 import { LexicalAIEditorNodes, ShortcutNode } from "../editor"
 import { AIPersistService } from "../services"
 import { useAIChatStore } from "../store/AIChatContext"
 import { useBlockActions, useChatActions, useCurrentChatId } from "../store/hooks"
-import { BlockSliceAction } from "../store/slices/block.slice"
 import type { AIChatContextBlock, SendingUIMessage } from "../store/types"
+import { appendAIOutputLanguageInstruction } from "../utils/output-language"
+import { getTimelineSummaryRequestOptions } from "../utils/timeline-summary"
+import { useTimelineSummaryContextBlocks } from "./timeline-summary-context"
 import { isTimelineSummaryAutoContext } from "./useTimelineSummaryAutoContext"
 
 const ONE_HOUR = 60 * 60 * 1000
@@ -74,6 +75,7 @@ const buildTimelineSummaryChatId = ({
 export const useAutoTimelineSummaryShortcut = () => {
   const aiSettings = useAISettingValue()
   const unreadOnly = useGeneralSettingKey("unreadOnly")
+  const actionLanguage = useActionLanguage()
 
   const { view, feedId, entryId, timelineId } = useRouteParamsSelector((params) => ({
     view: params.view,
@@ -85,6 +87,7 @@ export const useAutoTimelineSummaryShortcut = () => {
   const chatActions = useChatActions()
   const blockActions = useBlockActions()
   const currentChatId = useCurrentChatId()
+  const timelineSummaryContextBlocks = useTimelineSummaryContextBlocks()
   const timelineSummaryManualOverride = useAIChatStore()(
     (state) => state.timelineSummaryManualOverride,
   )
@@ -144,52 +147,27 @@ export const useAutoTimelineSummaryShortcut = () => {
     previousIsAllTimelineRef.current = isAllTimeline
   }, [blockActions, chatActions, currentChatId, isAllTimeline])
 
-  const contextBlocks = useMemo<AIChatContextBlock[]>(() => {
-    if (!isAllTimeline) return []
-
-    const blocks: AIChatContextBlock[] = []
-
-    if (typeof view === "number") {
-      blocks.push({
-        id: BlockSliceAction.SPECIAL_TYPES.mainView,
-        type: "mainView",
-        value: `${view}`,
-      })
-    }
-
-    if (normalizedFeedId && normalizedFeedId !== ROUTE_FEED_PENDING) {
-      let value = normalizedFeedId
-      if (normalizedFeedId.startsWith(ROUTE_FEED_IN_FOLDER)) {
-        const categoryName = normalizedFeedId.slice(ROUTE_FEED_IN_FOLDER.length)
-        const ids = getCategoryFeedIds(categoryName, FeedViewType.All)
-        if (ids.length > 0) {
-          value = ids.join(",")
-        }
-      }
-
-      blocks.push({
-        id: BlockSliceAction.SPECIAL_TYPES.mainFeed,
-        type: "mainFeed",
-        value,
-      })
-    }
-
-    if (unreadOnly) {
-      blocks.push({
-        id: BlockSliceAction.SPECIAL_TYPES.unreadOnly,
-        type: "unreadOnly",
-        value: "true",
-      })
-    }
-
-    return blocks
-  }, [isAllTimeline, normalizedFeedId, unreadOnly, view])
+  const contextBlocks = useMemo<AIChatContextBlock[]>(
+    () => (isAllTimeline ? timelineSummaryContextBlocks : []),
+    [isAllTimeline, timelineSummaryContextBlocks],
+  )
+  const localTimelineSummaryProfileId = resolveLocalAIProfileId(
+    aiSettings.localAI,
+    "timelineSummary",
+  )
+  const hasTimelineEntryContext = contextBlocks.some(
+    (block) => block.type === "timelineEntries" && block.value.trim(),
+  )
 
   useEffect(() => {
     if (!contextKey || !defaultShortcut) {
       if (!contextKey) {
         automationStateRef.current = { contextKey: null, promise: null, failed: false }
       }
+      return
+    }
+
+    if (localTimelineSummaryProfileId && !hasTimelineEntryContext) {
       return
     }
 
@@ -214,25 +192,31 @@ export const useAutoTimelineSummaryShortcut = () => {
 
     const run = async () => {
       try {
-        const prompt = getShortcutEffectivePrompt(defaultShortcut)
+        const prompt = appendAIOutputLanguageInstruction(
+          getShortcutEffectivePrompt(defaultShortcut),
+          actionLanguage,
+        )
         const { id, name } = defaultShortcut
 
-        const existingSession = await AIPersistService.findTimelineSummarySession({
-          view,
-          feedId: normalizedFeedId,
-          timelineId: timelineId ?? null,
-          unreadOnly,
-        })
-        const now = Date.now()
+        if (!localTimelineSummaryProfileId) {
+          const existingSession = await AIPersistService.findTimelineSummarySession({
+            view,
+            feedId: normalizedFeedId,
+            timelineId: timelineId ?? null,
+            unreadOnly,
+          })
+          const now = Date.now()
 
-        if (existingSession) {
-          const lastUpdatedAt = existingSession.updatedAt?.getTime?.() ?? existingSession.updatedAt
-          if (typeof lastUpdatedAt === "number" && now - lastUpdatedAt < ONE_HOUR) {
-            if (currentChatId !== existingSession.chatId) {
-              await chatActions.switchToChat(existingSession.chatId)
+          if (existingSession) {
+            const lastUpdatedAt =
+              existingSession.updatedAt?.getTime?.() ?? existingSession.updatedAt
+            if (typeof lastUpdatedAt === "number" && now - lastUpdatedAt < ONE_HOUR) {
+              if (currentChatId !== existingSession.chatId) {
+                await chatActions.switchToChat(existingSession.chatId)
+              }
+              automationStateRef.current.failed = false
+              return
             }
-            automationStateRef.current.failed = false
-            return
           }
         }
 
@@ -271,9 +255,7 @@ export const useAutoTimelineSummaryShortcut = () => {
 
         const message = buildSummaryMessage(tempEditor, contextBlocks, nanoid())
 
-        await chatActions.sendMessage(message, {
-          body: { localAIFeature: "timelineSummary", scene: "general" },
-        })
+        await chatActions.sendMessage(message, getTimelineSummaryRequestOptions())
 
         automationStateRef.current.failed = false
       } catch (error) {
@@ -295,10 +277,13 @@ export const useAutoTimelineSummaryShortcut = () => {
     contextKey,
     currentChatId,
     defaultShortcut,
+    hasTimelineEntryContext,
+    localTimelineSummaryProfileId,
     normalizedFeedId,
     timelineId,
     unreadOnly,
     view,
+    actionLanguage,
     timelineSummaryManualOverride,
   ])
 }

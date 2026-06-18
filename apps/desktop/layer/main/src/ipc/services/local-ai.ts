@@ -44,6 +44,7 @@ type LocalAICompleteTextInput = {
 
 type LocalAIChatStreamInput = {
   feature?: LocalAIFeature
+  forceStreaming?: boolean
   maxTokens?: number
   mcpServers?: LocalAIMCPServerInput[]
   messages: LocalAIChatMessage[]
@@ -156,19 +157,19 @@ export class LocalAIService extends IpcService {
         profileId,
       })
 
+      const preferredModel = modelOverride ?? resolved.profile.defaultChatModel
       const model =
-        modelOverride ??
-        resolved.profile.defaultChatModel ??
-        models[0] ??
-        resolved.profile.models[0]
+        preferredModel && (models.length === 0 || models.includes(preferredModel))
+          ? preferredModel
+          : (models[0] ?? resolved.profile.models[0])
       if (!model) {
         throw new Error("Local AI profile has no chat model to test")
       }
 
       await completeOpenAICompatibleText({
         apiKey: resolved.apiKey,
-        maxTokens: 4,
-        messages: [{ content: "Reply with OK.", role: "user" }],
+        maxTokens: 32,
+        messages: [{ content: "Reply with exactly OK.", role: "user" }],
         model,
         profile: resolved.profile,
         temperature: 0,
@@ -374,6 +375,7 @@ export class LocalAIService extends IpcService {
       const result = await streamOpenAICompatibleChat({
         abortSignal,
         apiKey: resolved.apiKey,
+        forceStreaming: input.forceStreaming,
         maxTokens: input.maxTokens,
         messages: input.messages,
         model: input.model,

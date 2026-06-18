@@ -2,7 +2,7 @@ export const SUBSCRIPTION_SOURCES = ["cloud", "local"] as const
 
 export type SubscriptionSource = (typeof SUBSCRIPTION_SOURCES)[number]
 
-export const DEFAULT_SUBSCRIPTION_SOURCE: SubscriptionSource = "cloud"
+export const DEFAULT_SUBSCRIPTION_SOURCE: SubscriptionSource = "local"
 
 export const getSubscriptionSource = (subscription: {
   source?: SubscriptionSource | null

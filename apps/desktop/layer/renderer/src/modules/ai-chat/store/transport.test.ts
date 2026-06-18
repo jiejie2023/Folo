@@ -5,7 +5,9 @@ import { createChatTransport } from "./transport"
 const mocks = vi.hoisted(() => ({
   cloudReconnectToStream: vi.fn(),
   cloudSendMessages: vi.fn(),
+  cloudTransportOptions: [] as unknown[],
   createLocalAIChatTransport: vi.fn(),
+  getActionLanguage: vi.fn(),
   getLocalAIProfileId: vi.fn(),
   localReconnectToStream: vi.fn(),
   localSendMessages: vi.fn(),
@@ -19,6 +21,10 @@ vi.mock("@follow/shared/env.desktop", () => ({
 
 vi.mock("ai", () => ({
   HttpChatTransport: class {
+    constructor(options: unknown) {
+      mocks.cloudTransportOptions.push(options)
+    }
+
     sendMessages(options: unknown) {
       return mocks.cloudSendMessages(options)
     }
@@ -37,6 +43,10 @@ vi.mock("~/modules/local-ai/chat-transport", () => ({
 
 vi.mock("~/modules/local-ai/hooks", () => ({
   getLocalAIProfileId: mocks.getLocalAIProfileId,
+}))
+
+vi.mock("~/atoms/settings/general", () => ({
+  getActionLanguage: mocks.getActionLanguage,
 }))
 
 vi.mock("../atoms/session", () => ({
@@ -60,6 +70,8 @@ const createSendOptions = () => ({
 describe("createChatTransport", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mocks.cloudTransportOptions.length = 0
+    mocks.getActionLanguage.mockReturnValue("zh-CN")
     mocks.createLocalAIChatTransport.mockReturnValue({
       reconnectToStream: mocks.localReconnectToStream,
       sendMessages: mocks.localSendMessages,
@@ -110,5 +122,46 @@ describe("createChatTransport", () => {
 
     expect(mocks.getLocalAIProfileId).toHaveBeenCalledWith("timelineSummary")
     expect(mocks.cloudSendMessages).not.toHaveBeenCalled()
+  })
+
+  it("routes timeline summary scene sends using the timelineSummary local AI setting", async () => {
+    const cloudStream = new ReadableStream()
+    const localStream = new ReadableStream()
+    mocks.cloudSendMessages.mockResolvedValue(cloudStream)
+    mocks.localSendMessages.mockResolvedValue(localStream)
+    mocks.getLocalAIProfileId.mockImplementation((feature) =>
+      feature === "timelineSummary" ? "profile-1" : null,
+    )
+
+    const transport = createChatTransport()
+    const options = {
+      ...createSendOptions(),
+      body: {
+        scene: "timeline-summary",
+      },
+    }
+
+    await expect(transport.sendMessages(options)).resolves.toBe(localStream)
+
+    expect(mocks.getLocalAIProfileId).toHaveBeenCalledWith("timelineSummary")
+    expect(mocks.cloudSendMessages).not.toHaveBeenCalled()
+  })
+
+  it("passes the configured AI output language to cloud chat requests", async () => {
+    const cloudStream = new ReadableStream()
+    mocks.cloudSendMessages.mockResolvedValue(cloudStream)
+    mocks.getLocalAIProfileId.mockReturnValue(null)
+    mocks.getActionLanguage.mockReturnValue("zh-CN")
+
+    const transport = createChatTransport()
+
+    await expect(transport.sendMessages(createSendOptions())).resolves.toBe(cloudStream)
+
+    const cloudTransportOption = mocks.cloudTransportOptions[0] as {
+      body: () => Record<string, unknown>
+    }
+    expect(cloudTransportOption.body()).toMatchObject({
+      language: "zh-CN",
+    })
   })
 })

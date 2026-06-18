@@ -20,6 +20,11 @@ export const BLOCK_STYLES = {
     icon: "bg-orange/10 text-orange",
     label: "text-orange",
   },
+  timelineEntries: {
+    container: "from-gray/5 to-gray/10 border-gray/20 hover:border-gray/30",
+    icon: "bg-gray/10 text-gray",
+    label: "text-gray",
+  },
   fileAttachment: {
     container: "from-pink/5 to-pink/10 border-pink/20 hover:border-pink/30",
     icon: "bg-pink/10 text-pink",
@@ -47,6 +52,7 @@ export const DEFAULT_BLOCK_STYLES = {
 export const BLOCK_ICONS = {
   mainEntry: "i-mgc-star-cute-fi",
   mainFeed: "i-mgc-rss-cute-fi",
+  timelineEntries: "i-mgc-list-check-3-cute-re",
   fileAttachment: "i-mgc-file-upload-cute-re",
   unreadOnly: "i-mgc-round-cute-fi",
 } as const
@@ -59,6 +65,7 @@ export const BLOCK_LABELS = {
   mainFeed: "Current",
   fileAttachment: "File",
   mainView: "View",
+  timelineEntries: "Timeline",
   unreadOnly: "Filter",
 } as const
 

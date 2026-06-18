@@ -1,6 +1,8 @@
 import * as React from "react"
+import { useTranslation } from "react-i18next"
 
 import { useAISettingValue } from "~/atoms/settings/ai"
+import { getAIShortcutDisplayName } from "~/modules/ai-chat/utils/shortcut-display"
 
 import { ShortcutTooltip } from "../../../../components/ui/ShortcutTooltip"
 import { MentionLikePill } from "../../shared/components/MentionLikePill"
@@ -18,18 +20,17 @@ export const ShortcutComponent: React.FC<ShortcutComponentProps> = ({
   onSelect,
 }) => {
   const { shortcuts } = useAISettingValue()
+  const { t } = useTranslation("ai")
   const matched = React.useMemo(() => {
-    return shortcuts.find((s) => s.name === shortcutData.name)
-  }, [shortcuts, shortcutData.name])
+    return shortcuts.find((s) => s.id === shortcutData.id)
+  }, [shortcuts, shortcutData.id])
+  const displayName = matched ? getAIShortcutDisplayName(matched, t) : shortcutData.name
   const handleClick = React.useCallback(() => {
     onSelect?.(shortcutData)
   }, [onSelect, shortcutData])
 
   return (
-    <ShortcutTooltip
-      name={shortcutData.name}
-      prompt={shortcutData.prompt || matched?.defaultPrompt}
-    >
+    <ShortcutTooltip name={displayName} prompt={shortcutData.prompt || matched?.defaultPrompt}>
       <MentionLikePill
         className={className}
         variant="command"
@@ -40,7 +41,7 @@ export const ShortcutComponent: React.FC<ShortcutComponentProps> = ({
         data-shortcut-id={shortcutData.id}
         onClick={handleClick}
       >
-        {shortcutData.name}
+        {displayName}
       </MentionLikePill>
     </ShortcutTooltip>
   )

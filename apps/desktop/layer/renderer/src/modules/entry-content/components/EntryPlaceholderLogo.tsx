@@ -7,20 +7,23 @@ import { stopPropagation } from "@follow/utils/dom"
 import { useSetAtom } from "jotai"
 import { useCallback } from "react"
 
+import { useTimelineSummaryContextBlocks } from "~/modules/ai-chat/hooks/timeline-summary-context"
 import { useSendAIShortcut } from "~/modules/ai-chat/hooks/useSendAIShortcut"
 import { aiTimelineEnabledAtom } from "~/modules/entry-column/atoms/ai-timeline"
 import { useSettingModal } from "~/modules/settings/modal/use-setting-modal-hack"
 
 export const EntryPlaceholderLogo = () => {
   const { sendAIShortcut } = useSendAIShortcut()
+  const timelineSummaryContextBlocks = useTimelineSummaryContextBlocks()
   const setAiTimelineEnabled = useSetAtom(aiTimelineEnabledAtom)
   const settingModalPresent = useSettingModal()
   const handleSummarizeTimeline = useCallback(() => {
     void sendAIShortcut({
+      contextBlocks: timelineSummaryContextBlocks,
       shortcutId: DEFAULT_SUMMARIZE_TIMELINE_SHORTCUT_ID,
       ensureNewChat: true,
     })
-  }, [sendAIShortcut])
+  }, [sendAIShortcut, timelineSummaryContextBlocks])
   const handleRecommendFeeds = useCallback(() => {
     void sendAIShortcut({
       shortcutId: DEFAULT_RECOMMEND_FEEDS_SHORTCUT_ID,

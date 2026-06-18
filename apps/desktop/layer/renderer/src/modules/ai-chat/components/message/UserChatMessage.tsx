@@ -9,6 +9,11 @@ import { RelativeTime } from "~/components/ui/datetime"
 import { useEditingMessageId, useSetEditingMessageId } from "~/modules/ai-chat/atoms/session"
 import { useChatActions, useChatScene, useChatStatus } from "~/modules/ai-chat/store/hooks"
 import type { AIChatContextBlock, BizUIMessage } from "~/modules/ai-chat/store/types"
+import {
+  extractShortcutIdFromMessageParts,
+  refreshShortcutTextInMessageParts,
+} from "~/modules/ai-chat/utils/shortcut"
+import { getRequestOptionsForShortcut } from "~/modules/ai-chat/utils/timeline-summary"
 
 import { AIDataBlockPart } from "./AIDataBlockPart"
 import { AIMessageIdContext } from "./AIMessageIdContext"
@@ -102,8 +107,13 @@ export const UserChatMessage: React.FC<UserChatMessageProps> = React.memo(({ mes
   }, [setEditingMessageId])
 
   const handleRetry = React.useCallback(() => {
-    chatActions.regenerate({ messageId })
-  }, [chatActions, messageId])
+    const shortcutId = extractShortcutIdFromMessageParts(message.parts)
+    const refreshedParts = refreshShortcutTextInMessageParts(message.parts)
+    if (refreshedParts !== message.parts) {
+      chatActions.updateMessage(messageId, { parts: refreshedParts })
+    }
+    chatActions.regenerate({ messageId, ...getRequestOptionsForShortcut(shortcutId) })
+  }, [chatActions, message.parts, messageId])
 
   const scene = useChatScene()
 

@@ -86,6 +86,7 @@ export const listOpenAICompatibleModels = async ({
   return payload.data
     .map((item: unknown) => (isRecord(item) ? (item as ModelListItem).id : undefined))
     .filter((id): id is string => typeof id === "string")
+    .map(normalizeOpenAICompatibleModelId)
 }
 
 export const completeOpenAICompatibleText = async ({
@@ -114,7 +115,7 @@ export const completeOpenAICompatibleText = async ({
       compactObject({
         max_tokens: maxTokens,
         messages: serializeMessages(messages),
-        model,
+        model: normalizeOpenAICompatibleModelId(model),
         response_format: responseFormat ? { type: responseFormat } : undefined,
         stream: false,
         temperature,
@@ -144,6 +145,7 @@ export const streamOpenAICompatibleChat = async ({
   apiKey,
   callTool,
   fetchFn = fetch,
+  forceStreaming = false,
   maxTokens,
   messages,
   model,
@@ -156,6 +158,7 @@ export const streamOpenAICompatibleChat = async ({
   apiKey: string
   callTool?: (toolCall: LocalAIToolCall) => Promise<string>
   fetchFn?: FetchFn
+  forceStreaming?: boolean
   maxTokens?: number
   messages: LocalAIChatMessage[]
   model: string
@@ -173,7 +176,7 @@ export const streamOpenAICompatibleChat = async ({
         compactObject({
           max_tokens: maxTokens,
           messages: requestMessages,
-          model,
+          model: normalizeOpenAICompatibleModelId(model),
           stream: false,
           temperature,
           tool_choice: "auto",
@@ -216,13 +219,13 @@ export const streamOpenAICompatibleChat = async ({
     ]
   }
 
-  if (!profile.supportsStreaming) {
+  if (!forceStreaming && !profile.supportsStreaming) {
     const response = await fetchFn(buildEndpoint(profile.baseURL, "/chat/completions"), {
       body: JSON.stringify(
         compactObject({
           max_tokens: maxTokens,
           messages: requestMessages,
-          model,
+          model: normalizeOpenAICompatibleModelId(model),
           stream: false,
           temperature,
         }),
@@ -255,7 +258,7 @@ export const streamOpenAICompatibleChat = async ({
       compactObject({
         max_tokens: maxTokens,
         messages: requestMessages,
-        model,
+        model: normalizeOpenAICompatibleModelId(model),
         stream: true,
         temperature,
       }),
@@ -335,7 +338,7 @@ export const synthesizeOpenAICompatibleSpeech = async ({
     body: JSON.stringify(
       compactObject({
         input,
-        model,
+        model: normalizeOpenAICompatibleModelId(model),
         response_format: format,
         voice,
       }),
@@ -354,6 +357,9 @@ export const synthesizeOpenAICompatibleSpeech = async ({
 
 const buildEndpoint = (baseURL: string, path: string): string =>
   `${baseURL.trim().replace(/\/+$/, "")}${path}`
+
+const normalizeOpenAICompatibleModelId = (model: string): string =>
+  model.trim().replace(/^models\//i, "")
 
 const buildHeaders = (
   profile: LocalAIStoredProfile,
@@ -482,7 +488,7 @@ const getFirstResponseMessage = (payload: ChatCompletionResponse): ChatMessageRe
 }
 
 const getMessageContent = (message: ChatMessageResponse | null): string | null =>
-  message && typeof message.content === "string" ? message.content : null
+  message ? getTextContent(message.content) : null
 
 const getToolCalls = (message: ChatMessageResponse | null): LocalAIToolCall[] => {
   if (!message || !Array.isArray(message.tool_calls)) return []
@@ -522,7 +528,46 @@ const getDeltaContents = (payload: ChatCompletionResponse): string[] => {
     }
 
     const delta = chatChoice.delta as ChatDeltaResponse
-    return typeof delta.content === "string" ? [delta.content] : []
+    return getTextContentParts(delta.content)
+  })
+}
+
+const getTextContent = (value: unknown): string | null => {
+  if (typeof value === "string") {
+    return value
+  }
+
+  if (Array.isArray(value)) {
+    const parts = getTextContentParts(value)
+    return parts.length > 0 ? parts.join("") : null
+  }
+
+  if (isRecord(value) && typeof value.text === "string") {
+    return value.text
+  }
+
+  return null
+}
+
+const getTextContentParts = (value: unknown): string[] => {
+  if (typeof value === "string") {
+    return [value]
+  }
+
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  return value.flatMap((part) => {
+    if (typeof part === "string") {
+      return [part]
+    }
+
+    if (isRecord(part) && typeof part.text === "string") {
+      return [part.text]
+    }
+
+    return []
   })
 }
 

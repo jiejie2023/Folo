@@ -3,6 +3,7 @@ import type { SupportedLanguages } from "@follow-app/client-sdk"
 import { useQueries, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect } from "react"
 
+import { localAI } from "../../context"
 import { useEntry, useEntryList } from "../entry/hooks"
 import type { EntryModel } from "../entry/types"
 import { useIsLoggedIn } from "../user/hooks"
@@ -47,9 +48,11 @@ export const usePrefetchEntryTranslation = ({
   }, [queryClient, translationMode])
 
   const isLoggedIn = useIsLoggedIn()
+  const isLocalTranslationEnabled = localAI()?.isFeatureEnabled("translation") ?? false
+  const canGenerateTranslation = isLoggedIn || isLocalTranslationEnabled
 
   return useQueries({
-    queries: isLoggedIn
+    queries: canGenerateTranslation
       ? entryList.map((entry) => {
           const entryId = entry.id
           const targetContent =

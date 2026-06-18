@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   completeText: vi.fn(),
   listMCPTools: vi.fn(),
   listProfiles: vi.fn(),
+  startChatStream: vi.fn(),
+  stopChatStream: vi.fn(),
   testProfile: vi.fn(),
   upsertProfile: vi.fn(),
 }))
@@ -23,6 +25,8 @@ vi.mock("./hooks", () => ({
     completeText: mocks.completeText,
     listProfiles: mocks.listProfiles,
     listMCPTools: mocks.listMCPTools,
+    startChatStream: mocks.startChatStream,
+    stopChatStream: mocks.stopChatStream,
     testProfile: mocks.testProfile,
     upsertProfile: mocks.upsertProfile,
   }),
@@ -64,6 +68,28 @@ const storedProfile: DesktopLocalAIStoredProfile = {
   ...existingProfile,
 }
 delete (storedProfile as Partial<DesktopLocalAIProfile>).maskedApiKey
+
+const listeners = new Map<string, Set<(event: unknown, payload: unknown) => void>>()
+
+const installElectronListeners = () => {
+  listeners.clear()
+  window.electron = {
+    ipcRenderer: {
+      on: vi.fn((channel: string, listener: (event: unknown, payload: unknown) => void) => {
+        const channelListeners = listeners.get(channel) ?? new Set()
+        channelListeners.add(listener)
+        listeners.set(channel, channelListeners)
+        return () => {
+          channelListeners.delete(listener)
+        }
+      }),
+    },
+  } as unknown as typeof window.electron
+}
+
+const emit = (channel: string, payload: unknown) => {
+  listeners.get(channel)?.forEach((listener) => listener({}, payload))
+}
 
 describe("createDesktopLocalAIBridge saveProfile", () => {
   beforeEach(() => {
@@ -316,5 +342,189 @@ describe("createDesktopLocalAIBridge translateEntries", () => {
         title: "标题",
       },
     })
+  })
+
+  it("rejects malformed translation responses instead of silently returning no results", async () => {
+    mocks.completeText.mockResolvedValue({
+      text: "I could not translate this response.",
+      totalTokens: 8,
+    })
+    const bridge = createDesktopLocalAIBridge()
+
+    await expect(
+      bridge.translateEntries({
+        fields: "content",
+        items: [{ content: "Content", entryId: "entry-1" }],
+        language: "zh-CN",
+        mode: "translation-only",
+        model: "translation-model",
+        profileId: "profile-1",
+      }),
+    ).rejects.toThrow("Local AI translation response was not valid JSON")
+  })
+})
+
+describe("createDesktopLocalAIBridge streamTranslateText", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    installElectronListeners()
+    mocks.listProfiles.mockResolvedValue([{ ...existingProfile, supportsStreaming: true }])
+    mocks.startChatStream.mockResolvedValue({ streamId: "translation-stream-1" })
+  })
+
+  it("streams translation text through local chat IPC deltas", async () => {
+    const bridge = createDesktopLocalAIBridge()
+    const deltas: string[] = []
+
+    const resultPromise = bridge.streamTranslateText?.({
+      content: "<p>Hello world.</p>",
+      field: "content",
+      language: "zh-CN",
+      mode: "translation-only",
+      model: "translation-model",
+      onDelta: (delta) => deltas.push(delta),
+      profileId: "profile-1",
+    })
+
+    await vi.waitFor(() => {
+      expect(listeners.get("local-ai:chat-delta")?.size).toBe(1)
+      expect(listeners.get("local-ai:chat-finish")?.size).toBe(1)
+    })
+
+    emit("local-ai:chat-delta", { delta: "你好", streamId: "translation-stream-1" })
+    emit("local-ai:chat-delta", { delta: "世界", streamId: "translation-stream-1" })
+    emit("local-ai:chat-finish", {
+      result: { text: "你好世界", totalTokens: 8 },
+      streamId: "translation-stream-1",
+    })
+
+    await expect(resultPromise).resolves.toEqual({
+      text: "你好世界",
+      usage: {
+        totalTokens: 8,
+      },
+    })
+    expect(deltas).toEqual(["你好", "世界"])
+    expect(mocks.startChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "translation",
+        model: "translation-model",
+        profileId: "profile-1",
+        temperature: 0.1,
+      }),
+    )
+    const [{ messages }] = vi.mocked(mocks.startChatStream).mock.calls[0]!
+    expect(messages[0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("Return only the translated text"),
+    })
+    expect(messages[1]).toMatchObject({
+      role: "user",
+      content: expect.stringContaining("<p>Hello world.</p>"),
+    })
+  })
+
+  it("does not ask the model to produce bilingual translation output", async () => {
+    const bridge = createDesktopLocalAIBridge()
+
+    const resultPromise = bridge.streamTranslateText?.({
+      content: "<p>Hello world.</p>",
+      field: "content",
+      language: "zh-CN",
+      mode: "bilingual",
+      model: "translation-model",
+      profileId: "profile-1",
+    })
+
+    await vi.waitFor(() => {
+      expect(listeners.get("local-ai:chat-finish")?.size).toBe(1)
+    })
+
+    emit("local-ai:chat-finish", {
+      result: { text: "你好世界", totalTokens: 8 },
+      streamId: "translation-stream-1",
+    })
+
+    await expect(resultPromise).resolves.toMatchObject({ text: "你好世界" })
+
+    const [{ messages }] = vi.mocked(mocks.startChatStream).mock.calls[0]!
+    expect(messages[0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("The app handles bilingual display"),
+    })
+    expect(messages[1]).toMatchObject({
+      role: "user",
+      content: expect.not.stringContaining("Display mode: bilingual"),
+    })
+  })
+
+  it("forces streaming for translation even when the profile disables generic streaming", async () => {
+    mocks.listProfiles.mockResolvedValue([{ ...existingProfile, supportsStreaming: false }])
+    const bridge = createDesktopLocalAIBridge()
+
+    const resultPromise = bridge.streamTranslateText?.({
+      content: "<li>Long first item.</li>",
+      field: "content",
+      language: "zh-CN",
+      mode: "bilingual",
+      model: "translation-model",
+      profileId: "profile-1",
+    })
+
+    await vi.waitFor(() => {
+      expect(listeners.get("local-ai:chat-finish")?.size).toBe(1)
+    })
+
+    emit("local-ai:chat-finish", {
+      result: { text: "<li>Translated first item.</li>", totalTokens: 8 },
+      streamId: "translation-stream-1",
+    })
+
+    await expect(resultPromise).resolves.toMatchObject({
+      text: "<li>Translated first item.</li>",
+    })
+    expect(mocks.completeText).not.toHaveBeenCalled()
+    expect(mocks.startChatStream).toHaveBeenCalledWith(
+      expect.objectContaining({
+        feature: "translation",
+        forceStreaming: true,
+      }),
+    )
+  })
+
+  it("keeps translation streams alive while waiting for the first token", async () => {
+    vi.useFakeTimers()
+    const bridge = createDesktopLocalAIBridge()
+
+    try {
+      const resultPromise = bridge.streamTranslateText?.({
+        content: "<p>Hello world.</p>",
+        field: "content",
+        language: "zh-CN",
+        mode: "translation-only",
+        model: "translation-model",
+        profileId: "profile-1",
+      })
+
+      await vi.waitFor(() => {
+        expect(listeners.get("local-ai:chat-delta")?.size).toBe(1)
+      })
+
+      await vi.advanceTimersByTimeAsync(10_000)
+
+      expect(mocks.stopChatStream).not.toHaveBeenCalled()
+
+      emit("local-ai:chat-delta", { delta: "姝ｅ湪缈昏瘧", streamId: "translation-stream-1" })
+      emit("local-ai:chat-finish", {
+        result: { text: "姝ｅ湪缈昏瘧", totalTokens: 8 },
+        streamId: "translation-stream-1",
+      })
+
+      await expect(resultPromise).resolves.toMatchObject({
+        text: "姝ｅ湪缈昏瘧",
+      })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })

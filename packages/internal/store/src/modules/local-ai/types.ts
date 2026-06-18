@@ -127,6 +127,23 @@ export interface LocalAITranslateEntriesInput {
   mode: "bilingual" | "translation-only"
 }
 
+export type LocalAITranslationField = "title" | "description" | "content" | "readabilityContent"
+
+export interface LocalAITranslateTextInput {
+  profileId?: string | null
+  model?: string | null
+  field: LocalAITranslationField
+  content: string
+  language: string
+  mode: "bilingual" | "translation-only"
+  onDelta?: (delta: string) => void
+}
+
+export interface LocalAIStreamTextResult {
+  text: string
+  usage?: LocalAIUsage
+}
+
 export interface LocalAITranslationResult {
   entryId: string
   title: string | null
@@ -234,6 +251,7 @@ export interface LocalAIBridge {
   translateEntries: (
     input: LocalAITranslateEntriesInput,
   ) => Promise<Record<string, LocalAITranslationResult | null>>
+  streamTranslateText?: (input: LocalAITranslateTextInput) => Promise<LocalAIStreamTextResult>
   synthesizeSpeech: (input: LocalAITTSInput) => Promise<LocalAITTSResult>
   runTask: (input: LocalAITaskInput) => Promise<LocalAITaskResult>
   listMCPServers: () => Promise<LocalAIMCPServer[]>

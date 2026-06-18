@@ -13,6 +13,7 @@ import {
   useCategoryOpenStateByView,
   useFeedsGroupedData,
   useSubscriptionListIds,
+  useSyncedFeedsGroupedData,
 } from "@follow/store/subscription/hooks"
 import { nextFrame } from "@follow/utils/dom"
 import { EventBus } from "@follow/utils/event-bus"
@@ -47,16 +48,21 @@ import { StarredItem } from "./StarredItem"
 import type { SubscriptionProps } from "./SubscriptionListGuard"
 
 const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: SubscriptionProps) => {
+  const routerParams = useRouteParams()
   const autoGroup = useGeneralSettingKey("autoGroup")
-  const feedsData = useFeedsGroupedData(view, autoGroup)
+  const allFeedsData = useFeedsGroupedData(view, autoGroup)
+  const syncedFeedsData = useSyncedFeedsGroupedData(view, autoGroup)
+  const feedsData = routerParams.isSyncedTimeline ? syncedFeedsData : allFeedsData
 
-  const listSubIds = useSubscriptionListIds(view)
-  const inboxSubIds = useInboxList(
+  const allListSubIds = useSubscriptionListIds(view)
+  const allInboxSubIds = useInboxList(
     useCallback(
       (inboxes) => (view === FeedViewType.Articles ? inboxes.map((inbox) => inbox.id) : []),
       [view],
     ),
   )
+  const listSubIds = routerParams.isSyncedTimeline ? [] : allListSubIds
+  const inboxSubIds = routerParams.isSyncedTimeline ? [] : allInboxSubIds
 
   const categoryOpenStateData = useCategoryOpenStateByView(view)
 
@@ -134,7 +140,6 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
 
   const shouldFreeUpSpace = useShouldFreeUpSpace()
 
-  const routerParams = useRouteParams()
   const { listId, feedId } = routerParams
   const isPreview = useIsPreviewFeed()
   const isFeedPreview = isPreview && !listId
@@ -245,7 +250,7 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
         viewportClassName={cn("!px-1", shouldFreeUpSpace && "!overflow-visible")}
         rootClassName={cn("h-full", shouldFreeUpSpace && "overflow-visible")}
       >
-        <StarredItem view={view} />
+        {!routerParams.isSyncedTimeline && <StarredItem view={view} />}
         {(hasListData || (isListPreview && listId)) && (
           <>
             <div className="mt-1 flex h-6 w-full shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-text-secondary transition-colors">
@@ -270,7 +275,6 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
             <SortByAlphabeticalInbox view={view} data={inboxSubIds} />
           </>
         )}
-
         {(hasListData || hasInboxData) && (
           <div
             className={cn(
@@ -281,7 +285,7 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
             {t("words.feeds")}
           </div>
         )}
-        {isFeedPreview && feedId && (
+        {isFeedPreview && feedId && !routerParams.isSyncedTimeline && (
           <FeedItem feedId={feedId} view={view} className="pl-2.5 pr-0.5" isPreview />
         )}
         <DraggableContext value={draggableContextValue}>

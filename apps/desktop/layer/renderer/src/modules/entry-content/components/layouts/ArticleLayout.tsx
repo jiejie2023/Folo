@@ -8,6 +8,7 @@ import { cn } from "@follow/utils"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { AIChatPanelStyle, useAIChatPanelStyle, useAIPanelVisibility } from "~/atoms/settings/ai"
+import { useGeneralSettingKey } from "~/atoms/settings/general"
 import { useUISettingKey } from "~/atoms/settings/ui"
 import { ErrorBoundary } from "~/components/common/ErrorBoundary"
 import { ShadowDOM } from "~/components/common/ShadowDOM"
@@ -28,6 +29,7 @@ import { EntryAttachments } from "../EntryAttachments"
 import { EntryTitle } from "../EntryTitle"
 import { MediaTranscript, TranscriptToggle, useTranscription } from "./shared"
 import { ArticleAudioPlayer } from "./shared/AudioPlayer"
+import { useStableTranslatedContent } from "./shared/use-stable-translated-content"
 import type { EntryLayoutProps } from "./types"
 
 export const ArticleLayout: React.FC<EntryLayoutProps> = ({
@@ -119,6 +121,7 @@ const Renderer: React.FC<{
   const isMarkdownEntry = useMemo(() => {
     return isOnboardingEntry(entryId)
   }, [entryId])
+  const translationMode = useGeneralSettingKey("translationMode")
   const readerRenderInlineStyle = useUISettingKey("readerRenderInlineStyle")
   const stableRenderStyle = useRenderStyle()
   const isInPeekModal = useInPeekModal()
@@ -129,15 +132,23 @@ const Renderer: React.FC<{
     [isInPeekModal],
   )
 
+  const ContentRenderer = useMemo(() => {
+    return isMarkdownEntry ? EntryContentMarkdownRenderer : EntryContentHTMLRenderer
+  }, [isMarkdownEntry])
+
+  const displayContent = useStableTranslatedContent({
+    format: isMarkdownEntry ? "markdown" : "html",
+    mode: translationMode,
+    source: content,
+    target: translation?.content,
+  })
+
   useEffect(() => {
     if (tocRef) {
       tocRef.current?.refreshItems()
     }
-  }, [content, tocRef])
+  }, [displayContent, tocRef])
 
-  const ContentRenderer = useMemo(() => {
-    return isMarkdownEntry ? EntryContentMarkdownRenderer : EntryContentHTMLRenderer
-  }, [isMarkdownEntry])
   return (
     <ContentRenderer
       view={view}
@@ -151,7 +162,7 @@ const Renderer: React.FC<{
       style={stableRenderStyle}
       renderInlineStyle={readerRenderInlineStyle}
     >
-      {translation?.content || content}
+      {displayContent}
     </ContentRenderer>
   )
 }

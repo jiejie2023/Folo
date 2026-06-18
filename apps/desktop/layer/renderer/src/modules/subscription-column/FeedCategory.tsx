@@ -36,6 +36,7 @@ import { useModalStack } from "../../components/ui/modal/stacked/hooks"
 import { ListCreationModalContent } from "../settings/tabs/lists/modals"
 import { CategoryRemoveDialogContent } from "./CategoryRemoveDialogContent"
 import { CategoryUnsubscribeDialogContent } from "./CategoryUnsubscribeDialogContent"
+import { getFeedCategoryOpenState } from "./FeedCategory.utils"
 import { RenameCategoryForm } from "./RenameCategoryForm"
 import { SortedFeedItems } from "./SortedFeedItems"
 import { feedColumnStyles } from "./styles"
@@ -69,11 +70,11 @@ function FeedCategoryImpl({
   const isCategory = sortByUnreadFeedList.length > 1 || !!subscription?.category
 
   const open = useMemo(() => {
-    if (!isCategory) return true
-    if (folderName && typeof categoryOpenStateData[folderName] === "boolean") {
-      return categoryOpenStateData[folderName]
-    }
-    return false
+    return getFeedCategoryOpenState({
+      categoryOpenStateData,
+      folderName,
+      isCategory,
+    })
   }, [categoryOpenStateData, folderName, isCategory])
 
   const setOpen = useCallback(
@@ -245,17 +246,14 @@ function FeedCategoryImpl({
                     click() {
                       return changeCategoryView(v.view)
                     },
-                    requiresLogin: true,
                   }),
               ),
-            requiresLogin: true,
           }),
           new MenuItemText({
             label: t("sidebar.feed_column.context_menu.rename_category"),
             click: () => {
               setIsCategoryEditing(true)
             },
-            requiresLogin: true,
           }),
           new MenuItemText({
             label: t("sidebar.feed_column.context_menu.ungroup_category"),
@@ -268,7 +266,6 @@ function FeedCategoryImpl({
                 content: () => <CategoryRemoveDialogContent category={folderName!} view={view} />,
               })
             },
-            requiresLogin: true,
           }),
           new MenuItemText({
             label: t("sidebar.feed_column.context_menu.unsubscribe_category"),
@@ -283,7 +280,6 @@ function FeedCategoryImpl({
                 ),
               })
             },
-            requiresLogin: true,
           }),
         ],
         e,

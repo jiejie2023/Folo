@@ -73,7 +73,13 @@ describe("OpenAI-compatible local AI client", () => {
   it("lists models with normalized URL, authorization, and profile headers", async () => {
     const { calls, fetchFn } = createFetch(
       Response.json({
-        data: [{ id: "gpt-4o-mini" }, { id: 123 }, { id: "qwen2.5" }, { name: "missing-id" }],
+        data: [
+          { id: "gpt-4o-mini" },
+          { id: 123 },
+          { id: "models/gemini-3.5-flash" },
+          { id: "qwen2.5" },
+          { name: "missing-id" },
+        ],
       }),
     )
 
@@ -83,7 +89,7 @@ describe("OpenAI-compatible local AI client", () => {
       profile: createProfile(),
     })
 
-    expect(models).toEqual(["gpt-4o-mini", "qwen2.5"])
+    expect(models).toEqual(["gpt-4o-mini", "gemini-3.5-flash", "qwen2.5"])
     expect(calls).toEqual([
       {
         init: expect.objectContaining({
@@ -157,6 +163,53 @@ describe("OpenAI-compatible local AI client", () => {
     })
   })
 
+  it("normalizes provider model IDs before sending chat completion requests", async () => {
+    const { calls, fetchFn } = createFetch(
+      Response.json({
+        choices: [{ message: { content: "Done" } }],
+      }),
+    )
+
+    await completeOpenAICompatibleText({
+      apiKey: "sk-secret",
+      fetchFn,
+      messages,
+      model: "models/gemini-3.5-flash",
+      profile: createProfile(),
+    })
+
+    expect(readRequestJson(calls[0]?.init)).toEqual({
+      messages,
+      model: "gemini-3.5-flash",
+      stream: false,
+    })
+  })
+
+  it("parses array-based message content returned by Gemini-compatible providers", async () => {
+    const { fetchFn } = createFetch(
+      Response.json({
+        choices: [
+          {
+            message: {
+              content: [{ text: "He" }, { text: "llo" }],
+            },
+          },
+        ],
+        usage: { total_tokens: 7 },
+      }),
+    )
+
+    await expect(
+      completeOpenAICompatibleText({
+        apiKey: "sk-secret",
+        fetchFn,
+        messages,
+        model: "gemini-3.5-flash",
+        profile: createProfile(),
+      }),
+    ).resolves.toEqual({ text: "Hello", totalTokens: 7 })
+  })
+
   it("passes abort signals to non-streaming requests", async () => {
     const controller = new AbortController()
     const { calls, fetchFn } = createFetch(
@@ -201,6 +254,33 @@ describe("OpenAI-compatible local AI client", () => {
 
     expect(deltas).toEqual(["Hello", " world"])
     expect(result).toEqual({ text: "Hello world", totalTokens: 9 })
+    expect(readRequestJson(calls[0]?.init)).toEqual({
+      messages,
+      model: "gpt-4o-mini",
+      stream: true,
+    })
+  })
+
+  it("can force streaming even when the profile disables generic streaming", async () => {
+    const deltas: string[] = []
+    const response = new Response(
+      createSSEStream(['data: {"choices":[{"delta":{"content":"Fast"}}]}\n\n', "data: [DONE]\n\n"]),
+      { headers: { "Content-Type": "text/event-stream" } },
+    )
+    const { calls, fetchFn } = createFetch(response)
+
+    const result = await streamOpenAICompatibleChat({
+      apiKey: "sk-secret",
+      fetchFn,
+      forceStreaming: true,
+      messages,
+      model: "gpt-4o-mini",
+      onDelta: (delta) => deltas.push(delta),
+      profile: createProfile({ supportsStreaming: false }),
+    })
+
+    expect(deltas).toEqual(["Fast"])
+    expect(result).toMatchObject({ text: "Fast" })
     expect(readRequestJson(calls[0]?.init)).toEqual({
       messages,
       model: "gpt-4o-mini",

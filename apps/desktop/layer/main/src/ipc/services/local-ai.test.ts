@@ -171,8 +171,8 @@ describe("LocalAIService", () => {
     expect(updateLocalAIProfileModels).toHaveBeenCalledWith("profile-1", ["llama3", "nomic-embed"])
     expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
       apiKey: "sk-secret-raw",
-      maxTokens: 4,
-      messages: [{ content: "Reply with OK.", role: "user" }],
+      maxTokens: 32,
+      messages: [{ content: "Reply with exactly OK.", role: "user" }],
       model: "llama3",
       profile: storedProfile,
       temperature: 0,
@@ -181,6 +181,33 @@ describe("LocalAIService", () => {
       "profile-1",
       expect.objectContaining({ ok: true }),
     )
+  })
+
+  it("tests a profile with a discovered model when the configured default is unavailable", async () => {
+    listLocalAIProfiles.mockReturnValue([{ ...profile, defaultChatModel: "Qwen3.6-35B-A3B" }])
+    listOpenAICompatibleModels.mockResolvedValue(["xopqwen36v35b"])
+    completeOpenAICompatibleText.mockResolvedValue({ text: "OK", totalTokens: 2 })
+    const service = new LocalAIService()
+
+    await expect(service.testProfile(context, "profile-1")).resolves.toEqual(
+      expect.objectContaining({
+        model: "xopqwen36v35b",
+        models: ["xopqwen36v35b"],
+        ok: true,
+      }),
+    )
+
+    expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
+      apiKey: "sk-secret-raw",
+      maxTokens: 32,
+      messages: [{ content: "Reply with exactly OK.", role: "user" }],
+      model: "xopqwen36v35b",
+      profile: {
+        ...storedProfile,
+        defaultChatModel: "Qwen3.6-35B-A3B",
+      },
+      temperature: 0,
+    })
   })
 
   it("continues profile tests with a configured model when model listing is unavailable", async () => {
@@ -200,8 +227,8 @@ describe("LocalAIService", () => {
     expect(updateLocalAIProfileModels).not.toHaveBeenCalled()
     expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
       apiKey: "sk-secret-raw",
-      maxTokens: 4,
-      messages: [{ content: "Reply with OK.", role: "user" }],
+      maxTokens: 32,
+      messages: [{ content: "Reply with exactly OK.", role: "user" }],
       model: "llama3",
       profile: storedProfile,
       temperature: 0,
@@ -213,6 +240,40 @@ describe("LocalAIService", () => {
         ok: true,
       }),
     )
+  })
+
+  it("tests Gemini profiles with normalized discovered model ids", async () => {
+    listLocalAIProfiles.mockReturnValue([
+      {
+        ...profile,
+        defaultChatModel: "gemini-3.5-flash",
+        models: ["models/gemini-3.5-flash"],
+      },
+    ])
+    listOpenAICompatibleModels.mockResolvedValue(["gemini-3.5-flash"])
+    completeOpenAICompatibleText.mockResolvedValue({ text: "OK", totalTokens: 2 })
+    const service = new LocalAIService()
+
+    await expect(service.testProfile(context, "profile-1")).resolves.toEqual(
+      expect.objectContaining({
+        model: "gemini-3.5-flash",
+        models: ["gemini-3.5-flash"],
+        ok: true,
+      }),
+    )
+
+    expect(completeOpenAICompatibleText).toHaveBeenCalledWith({
+      apiKey: "sk-secret-raw",
+      maxTokens: 32,
+      messages: [{ content: "Reply with exactly OK.", role: "user" }],
+      model: "gemini-3.5-flash",
+      profile: {
+        ...storedProfile,
+        defaultChatModel: "gemini-3.5-flash",
+        models: ["models/gemini-3.5-flash"],
+      },
+      temperature: 0,
+    })
   })
 
   it("returns completeText result and records successful usage", async () => {

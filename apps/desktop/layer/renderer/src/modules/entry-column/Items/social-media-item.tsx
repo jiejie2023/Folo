@@ -17,6 +17,7 @@ import { useEntryIsRead } from "~/hooks/biz/useAsRead"
 import { useRenderStyle } from "~/hooks/biz/useRenderStyle"
 import { jotaiStore } from "~/lib/jotai"
 import { parseSocialMedia } from "~/lib/parsers"
+import { useStableTranslatedContent } from "~/modules/entry-content/components/layouts/shared/use-stable-translated-content"
 import type { FeedIconEntry } from "~/modules/feed/feed-icon"
 import { FeedIcon } from "~/modules/feed/feed-icon"
 import { FeedTitle } from "~/modules/feed/feed-title"
@@ -85,9 +86,16 @@ export const SocialMediaItem: EntryListItemFC = ({ entryId, translation }) => {
   const renderStyle = useRenderStyle({ baseFontSize: 14, baseLineHeight: 1.625 })
 
   const titleRef = useRef<HTMLDivElement>(null)
-  if (!entry || !feed) return null
+  const content = entry?.content || entry?.description
+  const translationMode = useGeneralSettingKey("translationMode")
+  const displayContent = useStableTranslatedContent({
+    format: "html",
+    mode: translationMode,
+    source: content,
+    target: translation?.content,
+  })
 
-  const content = entry.content || entry.description
+  if (!entry || !feed) return null
 
   const parsed = parseSocialMedia(entry.authorUrl || entry.url || entry.guid)
   const EntryContentWrapper = autoExpandLongSocialMedia
@@ -139,7 +147,7 @@ export const SocialMediaItem: EntryListItemFC = ({ entryId, translation }) => {
                 noMedia
                 style={renderStyle}
               >
-                {translation?.content || content}
+                {displayContent}
               </HTML>
             </EntryContentWrapper>
             {isInCollection && <StarIcon className="absolute right-0 top-0" />}

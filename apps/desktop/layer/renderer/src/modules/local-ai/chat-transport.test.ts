@@ -8,8 +8,11 @@ import type { DesktopLocalAIIPC, DesktopLocalAIProfile } from "./hooks"
 
 const mocks = vi.hoisted(() => ({
   fallbackSendMessages: vi.fn(),
+  getActionLanguage: vi.fn(),
   getAISettings: vi.fn(),
   getEntry: vi.fn(),
+  getEntryIdsByFeedIds: vi.fn(),
+  getEntryIdsByView: vi.fn(),
   getLocalAIIPC: vi.fn(),
 }))
 
@@ -17,8 +20,14 @@ vi.mock("~/atoms/settings/ai", () => ({
   getAISettings: mocks.getAISettings,
 }))
 
+vi.mock("~/atoms/settings/general", () => ({
+  getActionLanguage: mocks.getActionLanguage,
+}))
+
 vi.mock("@follow/store/entry/getter", () => ({
   getEntry: mocks.getEntry,
+  getEntryIdsByFeedIds: mocks.getEntryIdsByFeedIds,
+  getEntryIdsByView: mocks.getEntryIdsByView,
 }))
 
 vi.mock("./hooks", async (importOriginal) => {
@@ -143,6 +152,9 @@ describe("createLocalAIChatTransport", () => {
       },
     })
     mocks.getEntry.mockReset()
+    mocks.getEntryIdsByFeedIds.mockReset()
+    mocks.getEntryIdsByView.mockReset()
+    mocks.getActionLanguage.mockReturnValue("zh-CN")
     mocks.fallbackSendMessages.mockResolvedValue(new ReadableStream<UIMessageChunk>())
   })
 
@@ -230,6 +242,163 @@ describe("createLocalAIChatTransport", () => {
     expect(messages[0]!.content).toContain("Article title")
     expect(messages[0]!.content).toContain("https://example.com/article")
     expect(messages[0]!.content).toContain("Readable article body")
+  })
+
+  it("adds current timeline entries to local timeline summary prompts", async () => {
+    mocks.getAISettings.mockReturnValue({
+      localAI: {
+        allowFallbackToCloud: false,
+        defaultProfileId: "profile-1",
+        enabled: true,
+        featureRouting: {
+          chat: "cloud",
+          mcp: "cloud",
+          onboardingRecommendations: "cloud",
+          summary: "cloud",
+          tasks: "cloud",
+          timelineRanking: "cloud",
+          timelineSummary: "local",
+          translation: "cloud",
+          tts: "cloud",
+        },
+      },
+    })
+    const ipc = createIPC()
+    mocks.getLocalAIIPC.mockReturnValue(ipc)
+    mocks.getEntryIdsByFeedIds.mockReturnValue(["entry-1", "entry-2"])
+    mocks.getEntry.mockImplementation((entryId: string) => {
+      const entries = {
+        "entry-1": {
+          content: "Important unread timeline content",
+          description: "Important unread description",
+          feedId: "feed-1",
+          publishedAt: new Date("2026-06-16T08:00:00.000Z"),
+          read: false,
+          title: "Important unread entry",
+          url: "https://example.com/unread",
+        },
+        "entry-2": {
+          content: "Already read content",
+          description: "Already read description",
+          feedId: "feed-1",
+          publishedAt: new Date("2026-06-16T07:00:00.000Z"),
+          read: true,
+          title: "Already read entry",
+          url: "https://example.com/read",
+        },
+      }
+      return entries[entryId as keyof typeof entries]
+    })
+    const transport = createLocalAIChatTransport({
+      createCloudTransport: () =>
+        ({
+          reconnectToStream: vi.fn(),
+          sendMessages: mocks.fallbackSendMessages,
+        }) as ReturnType<Parameters<typeof createLocalAIChatTransport>[0]["createCloudTransport"]>,
+      feature: "timelineSummary",
+    })
+
+    await transport.sendMessages({
+      abortSignal: undefined,
+      chatId: "chat-1",
+      messageId: undefined,
+      messages: [
+        createMessage([
+          {
+            type: "data-block",
+            data: [
+              { id: "mainView", type: "mainView", value: "0" },
+              { id: "mainFeed", type: "mainFeed", value: "feed-1" },
+              { id: "unreadOnly", type: "unreadOnly", value: "true" },
+            ],
+          },
+          {
+            type: "data-rich-text",
+            data: { state: "{}", text: "/ Summarize" },
+          },
+        ]),
+      ],
+      trigger: "submit-message",
+    })
+
+    const [{ messages }] = vi.mocked(ipc.startChatStream).mock.calls[0]!
+    expect(messages[0]!.content).toContain("Current timeline context")
+    expect(messages[0]!.content).toContain("Important unread entry")
+    expect(messages[0]!.content).toContain("Important unread timeline content")
+    expect(messages[0]!.content).not.toContain("Already read entry")
+  })
+
+  it("uses explicit visible timeline entries when summarizing a view timeline", async () => {
+    mocks.getAISettings.mockReturnValue({
+      localAI: {
+        allowFallbackToCloud: false,
+        defaultProfileId: "profile-1",
+        enabled: true,
+        featureRouting: {
+          chat: "cloud",
+          mcp: "cloud",
+          onboardingRecommendations: "cloud",
+          summary: "cloud",
+          tasks: "cloud",
+          timelineRanking: "cloud",
+          timelineSummary: "local",
+          translation: "cloud",
+          tts: "cloud",
+        },
+      },
+    })
+    const ipc = createIPC()
+    mocks.getLocalAIIPC.mockReturnValue(ipc)
+    mocks.getEntryIdsByView.mockReturnValue([])
+    mocks.getEntry.mockImplementation((entryId: string) => {
+      const entries = {
+        "visible-1": {
+          content: "Visible social timeline content",
+          description: "Visible social description",
+          feedId: "social-feed",
+          publishedAt: new Date("2026-06-17T01:00:00.000Z"),
+          read: false,
+          title: "Visible social entry",
+          url: "https://example.com/social",
+        },
+      }
+      return entries[entryId as keyof typeof entries]
+    })
+    const transport = createLocalAIChatTransport({
+      createCloudTransport: () =>
+        ({
+          reconnectToStream: vi.fn(),
+          sendMessages: mocks.fallbackSendMessages,
+        }) as ReturnType<Parameters<typeof createLocalAIChatTransport>[0]["createCloudTransport"]>,
+      feature: "timelineSummary",
+    })
+
+    await transport.sendMessages({
+      abortSignal: undefined,
+      chatId: "chat-1",
+      messageId: undefined,
+      messages: [
+        createMessage([
+          {
+            type: "data-block",
+            data: [
+              { id: "mainView", type: "mainView", value: "3" },
+              { id: "timelineEntries", type: "timelineEntries", value: "visible-1" },
+            ],
+          },
+          {
+            type: "data-rich-text",
+            data: { state: "{}", text: "/ Summarize" },
+          },
+        ]),
+      ],
+      trigger: "submit-message",
+    })
+
+    const [{ messages }] = vi.mocked(ipc.startChatStream).mock.calls[0]!
+    expect(messages[0]!.content).toContain("Current timeline context")
+    expect(messages[0]!.content).toContain("Visible social entry")
+    expect(messages[0]!.content).toContain("Visible social timeline content")
   })
 
   it("passes enabled local MCP services to tool-capable local chat profiles", async () => {
@@ -337,6 +506,27 @@ describe("createLocalAIChatTransport", () => {
     expect(messages[0]).toMatchObject({
       role: "system",
       content: expect.stringContaining("Answer in concise Chinese."),
+    })
+  })
+
+  it("adds the configured AI output language to local chat system messages", async () => {
+    const ipc = createIPC()
+    mocks.getLocalAIIPC.mockReturnValue(ipc)
+    mocks.getActionLanguage.mockReturnValue("zh-CN")
+    const transport = createTransport()
+
+    await transport.sendMessages({
+      abortSignal: undefined,
+      chatId: "chat-1",
+      messageId: undefined,
+      messages: [createMessage([{ type: "text", text: "Summarize this timeline" }])],
+      trigger: "submit-message",
+    })
+
+    const [{ messages }] = vi.mocked(ipc.startChatStream).mock.calls[0]!
+    expect(messages[0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("Output language: Simplified Chinese (zh-CN)"),
     })
   })
 

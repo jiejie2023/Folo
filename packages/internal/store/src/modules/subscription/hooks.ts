@@ -32,9 +32,14 @@ import {
   getSubscriptionIdsByViewSelector,
   getSubscriptionsByIdsSelector,
 } from "./getter"
-import { folderFeedsByFeedIdSelector } from "./selectors"
+import {
+  folderFeedsByFeedIdSelector,
+  getIsFeedSyncedSelector,
+  getSyncedFeedIdsSelector,
+} from "./selectors"
 import type { SubscriptionState } from "./store"
 import { subscriptionSyncService, useSubscriptionStore } from "./store"
+import type { SubscriptionModel } from "./types"
 import { getDefaultCategory } from "./utils"
 
 export const usePrefetchSubscription = (view?: FeedViewType) => {
@@ -326,27 +331,52 @@ export const useFeedsGroupedData = (view: FeedViewType, autoGroup: boolean) => {
   const data = useFeedSubscriptionByView(view)
 
   return useMemo(() => {
-    if (!data || data.length === 0) return {}
+    return groupFeedSubscriptions(data, autoGroup)
+  }, [autoGroup, data])
+}
 
-    const groupFolder = {} as Record<string, string[]>
+export const useSyncedFeedIds = (view?: FeedViewType) => {
+  return useSubscriptionStore(useCallback((state) => getSyncedFeedIdsSelector(state)(view), [view]))
+}
 
-    for (const subscription of data.filter((s) => !!s)) {
-      const category =
-        subscription.category ||
-        (autoGroup ? getDefaultCategory(subscription) : subscription.feedId)
+export const useIsFeedSynced = (feedId: string | undefined) => {
+  return useSubscriptionStore(
+    useCallback((state) => getIsFeedSyncedSelector(state)(feedId), [feedId]),
+  )
+}
 
-      if (category) {
-        if (!groupFolder[category]) {
-          groupFolder[category] = []
-        }
-        if (subscription.feedId) {
-          groupFolder[category].push(subscription.feedId)
-        }
+export const useSyncedFeedsGroupedData = (view: FeedViewType, autoGroup: boolean) => {
+  const syncedFeedIds = useSyncedFeedIds(view)
+  const data = useSubscriptionsByFeedIds(syncedFeedIds)
+
+  return useMemo(() => {
+    return groupFeedSubscriptions(data, autoGroup)
+  }, [autoGroup, data])
+}
+
+const groupFeedSubscriptions = (
+  data: Array<SubscriptionModel | undefined> | undefined,
+  autoGroup: boolean,
+): Record<string, string[]> => {
+  if (!data || data.length === 0) return {}
+
+  const groupFolder = {} as Record<string, string[]>
+
+  for (const subscription of data.filter((s) => !!s)) {
+    const category =
+      subscription.category || (autoGroup ? getDefaultCategory(subscription) : subscription.feedId)
+
+    if (category) {
+      if (!groupFolder[category]) {
+        groupFolder[category] = []
+      }
+      if (subscription.feedId) {
+        groupFolder[category].push(subscription.feedId)
       }
     }
+  }
 
-    return groupFolder
-  }, [autoGroup, data])
+  return groupFolder
 }
 
 export const useSubscriptionListIds = (view: FeedViewType) => {

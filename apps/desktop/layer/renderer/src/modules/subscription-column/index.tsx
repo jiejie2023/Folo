@@ -23,7 +23,7 @@ import { useIsInMASReview } from "~/atoms/server-configs"
 import { useUISettingKey } from "~/atoms/settings/ui"
 import { setTimelineColumnShow, useSubscriptionColumnShow } from "~/atoms/sidebar"
 import { Focusable } from "~/components/common/Focusable"
-import { HotkeyScope } from "~/constants"
+import { HotkeyScope, ROUTE_TIMELINE_SYNCED } from "~/constants"
 import { useBackHome } from "~/hooks/biz/useNavigateEntry"
 import { useReduceMotion } from "~/hooks/biz/useReduceMotion"
 import { parseView, useRouteParamsSelector } from "~/hooks/biz/useRouteParams"
@@ -36,6 +36,7 @@ import { useCommandBinding } from "../command/hooks/use-command-binding"
 import { getSelectedFeedIds, resetSelectedFeedIds, setSelectedFeedIds } from "./atom"
 import { useShouldFreeUpSpace } from "./hook"
 import { SubscriptionListGuard } from "./subscription-list/SubscriptionListGuard"
+import { insertSyncedTimeline } from "./subscription-timeline"
 import { SubscriptionColumnHeader } from "./SubscriptionColumnHeader"
 import { SubscriptionTabButton } from "./SubscriptionTabButton"
 
@@ -49,10 +50,14 @@ export function SubscriptionColumn({
   usePrefetchUnread()
 
   const carouselRef = useRef<HTMLDivElement>(null)
-  const timelineList = useTimelineList({
+  const visibleTimelineList = useTimelineList({
     withAll: true,
     visible: true,
   })
+  const timelineList = useMemo(
+    () => insertSyncedTimeline(visibleTimelineList),
+    [visibleTimelineList],
+  )
 
   const routeParams = useRouteParamsSelector((s) => ({
     timelineId: s.timelineId,
@@ -169,7 +174,11 @@ export function SubscriptionColumn({
             <section key={timelineId} className="h-full w-feed-col shrink-0 snap-center">
               <SubscriptionListGuard
                 key={timelineId}
-                view={parseView(timelineId) ?? FeedViewType.Articles}
+                view={
+                  timelineId === ROUTE_TIMELINE_SYNCED
+                    ? FeedViewType.All
+                    : (parseView(timelineId) ?? FeedViewType.Articles)
+                }
                 isSubscriptionLoading={isSubscriptionLoading}
               />
             </section>
@@ -185,7 +194,11 @@ export function SubscriptionColumn({
 const SwipeWrapper: FC<{ active: string; children: React.JSX.Element[] }> = memo(
   ({ children, active }) => {
     const reduceMotion = useReduceMotion()
-    const timelineList = useTimelineList({ withAll: true, visible: true })
+    const visibleTimelineList = useTimelineList({ withAll: true, visible: true })
+    const timelineList = useMemo(
+      () => insertSyncedTimeline(visibleTimelineList),
+      [visibleTimelineList],
+    )
     const viewIndex = timelineList.indexOf(active)
 
     const feedColumnWidth = useUISettingKey("feedColWidth")
@@ -238,7 +251,11 @@ const SwipeWrapper: FC<{ active: string; children: React.JSX.Element[] }> = memo
 )
 
 const TabsRow: FC = () => {
-  const timelineList = useTimelineList({ withAll: true, visible: true })
+  const visibleTimelineList = useTimelineList({ withAll: true, visible: true })
+  const timelineList = useMemo(
+    () => insertSyncedTimeline(visibleTimelineList),
+    [visibleTimelineList],
+  )
 
   return (
     <div className="flex h-11 items-center px-1 text-xl text-text-secondary">

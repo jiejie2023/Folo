@@ -27,7 +27,7 @@ export const SettingAI = () => {
   const { t } = useTranslation("ai")
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 min-w-0 max-w-full">
       <SettingBuilder
         settings={[
           {

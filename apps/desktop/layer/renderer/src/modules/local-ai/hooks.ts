@@ -1,6 +1,7 @@
 import type {
   LocalAIFeature,
   LocalAIFeatureRouting,
+  LocalAIProfileRouting,
   LocalAISettings,
 } from "@follow/shared/settings/interface"
 import { useQuery } from "@tanstack/react-query"
@@ -145,6 +146,7 @@ export type DesktopLocalAIIPC = {
   listUsage: (limit?: number) => Promise<DesktopLocalAIUsageRecord[]>
   startChatStream: (input: {
     feature?: LocalAIFeature
+    forceStreaming?: boolean
     maxTokens?: number
     mcpServers?: Array<{
       enabled: boolean
@@ -212,7 +214,7 @@ export const resolveLocalAIProfileId = (
 ): string | null => {
   if (!settings.enabled) return null
   if (resolveLocalAIMode(settings, feature) !== "local") return null
-  return settings.defaultProfileId
+  return settings.featureProfileIds?.[feature] ?? settings.defaultProfileId
 }
 
 export type LocalAIModelPurpose = "chat" | "summary" | "tasks" | "timeline" | "translation" | "tts"
@@ -232,21 +234,40 @@ export const resolveLocalAIProfileModel = (
   profile: LocalAIModelConfiguration,
   purpose: LocalAIModelPurpose,
 ): string => {
+  const normalizedModels = profile.models.map(normalizeLocalAIModelId)
   const modelByPurpose = {
-    chat: profile.defaultChatModel,
-    summary: profile.defaultSummaryModel,
-    tasks: profile.defaultTaskModel,
-    timeline: profile.defaultTimelineModel,
-    translation: profile.defaultTranslationModel,
-    tts: profile.defaultTtsModel,
+    chat: normalizeOptionalLocalAIModelId(profile.defaultChatModel),
+    summary: normalizeOptionalLocalAIModelId(profile.defaultSummaryModel),
+    tasks: normalizeOptionalLocalAIModelId(profile.defaultTaskModel),
+    timeline: normalizeOptionalLocalAIModelId(profile.defaultTimelineModel),
+    translation: normalizeOptionalLocalAIModelId(profile.defaultTranslationModel),
+    tts: normalizeOptionalLocalAIModelId(profile.defaultTtsModel),
   } satisfies Record<LocalAIModelPurpose, string | null>
 
-  const model = modelByPurpose[purpose] ?? profile.defaultChatModel ?? profile.models[0]
+  const hasDiscoveredModels = normalizedModels.length > 0
+  const purposeModel = modelByPurpose[purpose]
+  const chatModel = modelByPurpose.chat
+  if (
+    purposeModel &&
+    (!hasDiscoveredModels || normalizedModels.includes(purposeModel) || purposeModel !== chatModel)
+  ) {
+    return purposeModel
+  }
+
+  const model =
+    chatModel && (!hasDiscoveredModels || normalizedModels.includes(chatModel))
+      ? chatModel
+      : normalizedModels[0]
   if (!model) {
     throw new Error(`No local AI model is configured for ${purpose}`)
   }
   return model
 }
+
+const normalizeLocalAIModelId = (model: string): string => model.trim().replace(/^models\//i, "")
+
+const normalizeOptionalLocalAIModelId = (model: string | null): string | null =>
+  model ? normalizeLocalAIModelId(model) : null
 
 export const resolveLocalAITaskModelPurpose = (
   feature: LocalAIFeature,
@@ -271,24 +292,52 @@ const LOCAL_AI_FEATURES: LocalAIFeature[] = [
   "mcp",
 ]
 
+const cloneLocalAIProfileRouting = (routing?: LocalAIProfileRouting): LocalAIProfileRouting => ({
+  ...routing,
+})
+
 export const clearDeletedLocalAIDefaultProfile = (
   settings: LocalAISettings,
   deletedProfileId: string,
 ): LocalAISettings => {
-  if (settings.defaultProfileId !== deletedProfileId) return settings
+  let changed = false
+  let featureProfileIdsChanged = false
+  const featureProfileIds = cloneLocalAIProfileRouting(settings.featureProfileIds)
+
+  for (const feature of LOCAL_AI_FEATURES) {
+    if (featureProfileIds[feature] !== deletedProfileId) continue
+    featureProfileIds[feature] = null
+    changed = true
+    featureProfileIdsChanged = true
+  }
+
+  const defaultProfileId =
+    settings.defaultProfileId === deletedProfileId ? null : settings.defaultProfileId
+  if (defaultProfileId !== settings.defaultProfileId) {
+    changed = true
+  }
+
+  const nextSettings: LocalAISettings = {
+    ...settings,
+    defaultProfileId,
+    ...(settings.featureProfileIds || featureProfileIdsChanged ? { featureProfileIds } : {}),
+  }
 
   const featureRouting = LOCAL_AI_FEATURES.reduce<LocalAIFeatureRouting>(
     (routing, feature) => {
-      routing[feature] =
-        settings.featureRouting[feature] === "local" ? "cloud" : settings.featureRouting[feature]
+      if (routing[feature] !== "local") return routing
+      if (resolveLocalAIProfileId(nextSettings, feature) !== null) return routing
+      routing[feature] = "cloud"
+      changed = true
       return routing
     },
     { ...settings.featureRouting },
   )
 
+  if (!changed) return settings
+
   return {
-    ...settings,
-    defaultProfileId: null,
+    ...nextSettings,
     featureRouting,
   }
 }

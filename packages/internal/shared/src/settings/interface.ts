@@ -268,11 +268,13 @@ export type LocalAIFeature =
 export type LocalAIMode = "cloud" | "local"
 
 export type LocalAIFeatureRouting = Record<LocalAIFeature, LocalAIMode>
+export type LocalAIProfileRouting = Partial<Record<LocalAIFeature, string | null>>
 
 export interface LocalAISettings {
   enabled: boolean
   defaultProfileId: string | null
   featureRouting: LocalAIFeatureRouting
+  featureProfileIds?: LocalAIProfileRouting
   allowFallbackToCloud: boolean
 }
 

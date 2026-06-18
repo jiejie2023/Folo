@@ -1,4 +1,6 @@
 import { FeedViewType } from "@follow/constants"
+import { EntryService } from "@follow/database/services/entry"
+import { FeedService } from "@follow/database/services/feed"
 import { SubscriptionService } from "@follow/database/services/subscription"
 import { tracker } from "@follow/tracker"
 import { omit } from "es-toolkit"
@@ -19,6 +21,10 @@ import { listActions } from "../list/store"
 import { unreadActions } from "../unread/store"
 import { whoami } from "../user/getters"
 import { getCategoryFeedIds } from "./getter"
+import {
+  inferRecoveredSubscriptionCategory,
+  RECOVERED_LOCAL_SUBSCRIPTION_CATEGORY,
+} from "./recovery-category"
 import type { SubscriptionSource } from "./source"
 import { getSubscriptionSource } from "./source"
 import type { LocalSubscriptionInput, SubscriptionForm, SubscriptionModel } from "./types"
@@ -43,6 +49,9 @@ export interface SubscriptionState {
    * Value: SubscriptionPlainModel
    */
   data: Record<string, SubscriptionModel>
+
+  /** Feed ids confirmed to exist in the signed-in account. */
+  syncedFeedIds: Set<FeedId>
 
   feedIdByView: Record<FeedViewType, Set<FeedId>>
 
@@ -72,6 +81,7 @@ const emptyCategoryOpenStateByView: Record<FeedViewType, Record<string, boolean>
 
 const defaultState: SubscriptionState = {
   data: {},
+  syncedFeedIds: new Set(),
   feedIdByView: createEmptySetByView(),
   listIdByView: createEmptySetByView(),
   categories: createEmptySetByView(),
@@ -138,6 +148,82 @@ const invalidateViews = (...views: (FeedViewType | undefined)[]) => {
     views: Array.from(viewSet),
   })
 }
+
+type CachedFeed = Awaited<ReturnType<typeof FeedService.getFeedAll>>[number]
+type CachedEntry = Awaited<ReturnType<typeof EntryService.getEntryAll>>[number]
+
+const recoverLocalSubscriptionsFromCachedFeeds = (
+  existingSubscriptions: SubscriptionModel[],
+  feeds: CachedFeed[],
+  entries: CachedEntry[],
+): SubscriptionModel[] => {
+  const existingFeedIds = new Set(
+    existingSubscriptions
+      .map((subscription) => subscription.feedId)
+      .filter((feedId): feedId is string => !!feedId),
+  )
+  const cachedFeeds = feeds.filter((feed) => feed.id && feed.url && !existingFeedIds.has(feed.id))
+
+  if (cachedFeeds.length === 0) return []
+
+  const feedIdsWithEntries = new Set<string>()
+  for (const entry of entries) {
+    if (entry.feedId) {
+      feedIdsWithEntries.add(entry.feedId)
+    }
+  }
+
+  const recoveredFeeds =
+    feedIdsWithEntries.size > 0
+      ? cachedFeeds.filter((feed) => feedIdsWithEntries.has(feed.id))
+      : cachedFeeds
+
+  return recoveredFeeds.map((feed) => ({
+    feedId: feed.id,
+    listId: null,
+    inboxId: null,
+    userId: "local",
+    view: FeedViewType.Articles,
+    isPrivate: false,
+    hideFromTimeline: null,
+    title: null,
+    category: inferRecoveredSubscriptionCategory(feed),
+    createdAt: new Date().toISOString(),
+    type: "feed",
+    source: "local",
+    synced: false,
+  }))
+}
+
+const reclassifyRecoveredLocalSubscriptions = (
+  subscriptions: SubscriptionModel[],
+  feeds: CachedFeed[],
+): SubscriptionModel[] => {
+  const feedById = new Map(feeds.map((feed) => [feed.id, feed]))
+
+  return subscriptions.flatMap((subscription) => {
+    if (
+      getSubscriptionSource(subscription) !== "local" ||
+      subscription.category !== RECOVERED_LOCAL_SUBSCRIPTION_CATEGORY ||
+      !subscription.feedId
+    ) {
+      return []
+    }
+
+    const feed = feedById.get(subscription.feedId)
+    if (!feed) return []
+
+    const category = inferRecoveredSubscriptionCategory(feed)
+
+    return [
+      {
+        ...subscription,
+        category,
+      },
+    ]
+  })
+}
+
 export const useSubscriptionStore = createZustandStore<SubscriptionState>("subscription")(
   () => defaultState,
 )
@@ -145,20 +231,137 @@ export const useSubscriptionStore = createZustandStore<SubscriptionState>("subsc
 const get = useSubscriptionStore.getState
 
 const immerSet = createImmerSetter(useSubscriptionStore)
+
+const shouldPreserveLocalSubscription = (
+  current: SubscriptionModel | undefined,
+  next: SubscriptionModel,
+) => {
+  return (
+    current && getSubscriptionSource(current) === "local" && getSubscriptionSource(next) === "cloud"
+  )
+}
+
+const filterLocalFirstSubscriptions = (subscriptions: SubscriptionModel[]) => {
+  const state = get()
+  return subscriptions.filter((subscription) => {
+    const subscriptionStoreId = getSubscriptionStoreId(subscription)
+    return !shouldPreserveLocalSubscription(state.data[subscriptionStoreId], subscription)
+  })
+}
+
+const getLocalSubscriptionsSyncedByCloudUpserts = (subscriptions: SubscriptionModel[]) => {
+  const state = get()
+  return subscriptions
+    .filter((subscription) => {
+      const current = state.data[getSubscriptionStoreId(subscription)]
+      return !!subscription.feedId && shouldPreserveLocalSubscription(current, subscription)
+    })
+    .map((subscription) => subscription.feedId!)
+}
+
+const getLocalSyncedFeedIds = (view?: FeedViewType) => {
+  return Object.values(get().data)
+    .filter((subscription) => {
+      return (
+        subscription.type === "feed" &&
+        !!subscription.feedId &&
+        getSubscriptionSource(subscription) === "local" &&
+        !!subscription.synced &&
+        (typeof view !== "number" || subscription.view === view)
+      )
+    })
+    .map((subscription) => subscription.feedId!)
+}
+
+const getAccountMutableFeedIds = (feedIds: string[]) => {
+  if (!whoami()) return []
+
+  return feedIds
+    .map((id) => get().data[id])
+    .filter((subscription): subscription is SubscriptionModel => {
+      return (
+        !!subscription &&
+        subscription.type === "feed" &&
+        !!subscription.feedId &&
+        (getSubscriptionSource(subscription) === "cloud" || !!subscription.synced)
+      )
+    })
+    .map((subscription) => subscription.feedId!)
+}
+
 class SubscriptionActions implements Hydratable, Resetable {
   async hydrate() {
-    const subscriptions = await SubscriptionService.getSubscriptionAll()
-    subscriptionActions.upsertManyInSession(
-      subscriptions.map((s) => dbStoreMorph.toSubscriptionModel(s)),
+    const [subscriptions, feeds, entries] = await Promise.all([
+      SubscriptionService.getSubscriptionAll(),
+      FeedService.getFeedAll(),
+      EntryService.getEntryAll(),
+    ])
+    const subscriptionModels = subscriptions.map((s) => dbStoreMorph.toSubscriptionModel(s))
+    if (subscriptionModels.length > 0) {
+      await this.upsertManyInSession(subscriptionModels)
+    }
+
+    const reclassifiedSubscriptions = reclassifyRecoveredLocalSubscriptions(
+      subscriptionModels,
+      feeds,
     )
+    if (reclassifiedSubscriptions.length > 0) {
+      await Promise.all(
+        reclassifiedSubscriptions.map((subscription) =>
+          SubscriptionService.patch(storeDbMorph.toSubscriptionSchema(subscription)),
+        ),
+      )
+      this.replaceManyAndRebuildIndexesInSession(reclassifiedSubscriptions)
+    }
+
+    const recoveredSubscriptions = recoverLocalSubscriptionsFromCachedFeeds(
+      subscriptionModels,
+      feeds,
+      entries,
+    )
+    if (recoveredSubscriptions.length === 0) {
+      return
+    }
+
+    await SubscriptionService.upsertMany(
+      recoveredSubscriptions.map((subscription) => storeDbMorph.toSubscriptionSchema(subscription)),
+    )
+    await this.upsertManyInSession(recoveredSubscriptions)
   }
+  private replaceManyAndRebuildIndexesInSession(subscriptions: SubscriptionModel[]) {
+    immerSet((draft) => {
+      for (const subscription of subscriptions) {
+        draft.data[getSubscriptionStoreId(subscription)] = subscription
+      }
+      rebuildSubscriptionIndexes(draft)
+    })
+  }
+
   async upsertManyInSession(subscriptions: SubscriptionModel[]) {
     immerSet((draft) => {
       for (const subscription of subscriptions) {
+        const nextSubscription =
+          getSubscriptionSource(subscription) === "cloud"
+            ? {
+                ...subscription,
+                synced: true,
+              }
+            : subscription
         const subscriptionSetId = getSubscriptionDBId(subscription)
         const subscriptionStoreId = getSubscriptionStoreId(subscription)
+        if (
+          (subscription.synced || getSubscriptionSource(subscription) === "cloud") &&
+          subscription.feedId
+        ) {
+          draft.syncedFeedIds.add(subscription.feedId)
+        }
+        const current = draft.data[subscriptionStoreId]
+        if (current && shouldPreserveLocalSubscription(current, subscription)) {
+          current.synced = true
+          continue
+        }
 
-        draft.data[subscriptionStoreId] = subscription
+        draft.data[subscriptionStoreId] = nextSubscription
         draft.subscriptionIdSet.add(subscriptionSetId)
 
         if (subscription.feedId && subscription.type === "feed") {
@@ -179,12 +382,15 @@ class SubscriptionActions implements Hydratable, Resetable {
     subscriptions: SubscriptionModel[],
     options: { resetBeforeUpsert?: boolean | FeedViewType; resetSource?: SubscriptionSource } = {},
   ) {
+    const resetView =
+      typeof options.resetBeforeUpsert === "number" ? options.resetBeforeUpsert : undefined
+    const subscriptionsToUpsert = filterLocalFirstSubscriptions(subscriptions)
+    const localSyncedFeedIdsToReset =
+      options.resetSource === "cloud" ? getLocalSyncedFeedIds(resetView) : []
+    const localSyncedFeedIdsToMark = getLocalSubscriptionsSyncedByCloudUpserts(subscriptions)
     const tx = createTransaction()
     tx.store(() => {
       if (options.resetBeforeUpsert !== undefined) {
-        const resetView =
-          typeof options.resetBeforeUpsert === "number" ? options.resetBeforeUpsert : undefined
-
         if (options.resetSource) {
           this.resetBySourceInSession(options.resetSource, resetView)
         } else if (typeof options.resetBeforeUpsert === "boolean") {
@@ -201,14 +407,32 @@ class SubscriptionActions implements Hydratable, Resetable {
     tx.persist(() => {
       return (async () => {
         if (options.resetSource) {
-          const resetView =
-            typeof options.resetBeforeUpsert === "number" ? options.resetBeforeUpsert : undefined
-
           await SubscriptionService.resetBySource(options.resetSource, resetView)
         }
 
+        if (localSyncedFeedIdsToReset.length > 0) {
+          await SubscriptionService.patchMany({
+            feedIds: localSyncedFeedIdsToReset,
+            data: { synced: false },
+          })
+        }
+
+        if (localSyncedFeedIdsToMark.length > 0) {
+          await SubscriptionService.patchMany({
+            feedIds: localSyncedFeedIdsToMark,
+            data: { synced: true },
+          })
+        }
+
+        if (subscriptionsToUpsert.length === 0) return
+
         return SubscriptionService.upsertMany(
-          subscriptions.map((s) => storeDbMorph.toSubscriptionSchema(s)),
+          subscriptionsToUpsert.map((s) =>
+            storeDbMorph.toSubscriptionSchema({
+              ...s,
+              synced: s.synced || getSubscriptionSource(s) === "cloud",
+            }),
+          ),
         )
       })()
     })
@@ -218,6 +442,17 @@ class SubscriptionActions implements Hydratable, Resetable {
 
   resetBySourceInSession(source: SubscriptionSource, view?: FeedViewType) {
     immerSet((draft) => {
+      if (source === "cloud") {
+        for (const feedId of draft.syncedFeedIds) {
+          const subscription = draft.data[feedId]
+          if (typeof view === "number" && subscription?.view !== view) continue
+          if (subscription && getSubscriptionSource(subscription) === "local") {
+            subscription.synced = false
+          }
+          draft.syncedFeedIds.delete(feedId)
+        }
+      }
+
       for (const [subscriptionStoreId, subscription] of Object.entries(draft.data)) {
         if (getSubscriptionSource(subscription) !== source) continue
         if (typeof view === "number" && subscription.view !== view) continue
@@ -242,6 +477,15 @@ class SubscriptionActions implements Hydratable, Resetable {
     immerSet((state) => {
       state.categoryOpenStateByView[view]![category] =
         !state.categoryOpenStateByView[view]![category]
+    })
+  }
+
+  markFeedSynced(feedId: string) {
+    immerSet((draft) => {
+      draft.syncedFeedIds.add(feedId)
+      if (draft.data[feedId]) {
+        draft.data[feedId].synced = true
+      }
     })
   }
 
@@ -404,10 +648,66 @@ class SubscriptionSyncService {
         listId: data.list?.id ?? null,
         inboxId: null,
         userId: whoami()?.id ?? "",
+        source: "cloud",
       },
     ])
 
     invalidateViews(subscription.view)
+  }
+
+  async syncLocalToCloud(feedId: string) {
+    const current = get().data[feedId]
+    if (!current) {
+      throw new Error("Subscription not found")
+    }
+
+    if (current.type !== "feed" || !current.feedId) {
+      throw new Error("Only feed subscriptions can be synced to account")
+    }
+
+    if (getSubscriptionSource(current) !== "local") {
+      return
+    }
+
+    if (!whoami()) {
+      throw new Error("Login required")
+    }
+
+    const feed = getFeedById(current.feedId)
+    if (!feed?.url) {
+      throw new Error("Cannot sync local subscription without a feed url")
+    }
+
+    const subscription = {
+      url: feed.url,
+      view: current.view,
+      category: current.category,
+      isPrivate: current.isPrivate,
+      feedId: current.feedId,
+      listId: undefined,
+      title: current.title,
+      hideFromTimeline: current.hideFromTimeline,
+    }
+
+    const data = await api().subscriptions.create(subscription)
+
+    if (data.feed) {
+      feedActions.upsertMany([data.feed as any])
+      tracker.subscribe({ feedId: data.feed.id, view: current.view })
+    }
+
+    if (data.unread) {
+      unreadActions.upsertMany(data.unread)
+    }
+
+    await this.fetch()
+    subscriptionActions.markFeedSynced(feedId)
+    await SubscriptionService.patch({
+      id: buildSubscriptionDbId(current),
+      synced: true,
+    })
+
+    invalidateViews(current.view)
   }
 
   async subscribeLocal({ feed, subscription, entries }: LocalSubscriptionInput) {
@@ -457,6 +757,12 @@ class SubscriptionSyncService {
 
     const feedSubscriptions = subscriptionList.filter((i) => i.type === "feed")
     const listSubscriptions = subscriptionList.filter((i) => i.type === "list")
+    const shouldSyncCloud = !!whoami()
+    const cloudSubscriptionList = shouldSyncCloud
+      ? subscriptionList.filter((i) => getSubscriptionSource(i) === "cloud")
+      : []
+    const cloudFeedSubscriptions = cloudSubscriptionList.filter((i) => i.type === "feed")
+    const cloudListSubscriptions = cloudSubscriptionList.filter((i) => i.type === "list")
 
     const tx = createTransaction(subscriptionList)
 
@@ -469,6 +775,7 @@ class SubscriptionSyncService {
           if (subscription.feedId) {
             draft.feedIdByView[subscription.view]!.delete(subscription.feedId)
             draft.feedIdByView[FeedViewType.All]!.delete(subscription.feedId)
+            draft.syncedFeedIds.delete(subscription.feedId)
           }
           if (subscription.listId) {
             draft.listIdByView[subscription.view]!.delete(subscription.listId)
@@ -483,13 +790,17 @@ class SubscriptionSyncService {
       })
     })
 
-    tx.request(async () => {
-      const feedIdList = feedSubscriptions.map((s) => s.feedId).filter((i) => typeof i === "string")
-      await api().subscriptions.delete({
-        feedIdList: feedIdList.length > 0 ? feedIdList : undefined,
-        listId: listSubscriptions.at(0)?.listId || undefined,
+    if (cloudSubscriptionList.length > 0) {
+      tx.request(async () => {
+        const feedIdList = cloudFeedSubscriptions
+          .map((s) => s.feedId)
+          .filter((i) => typeof i === "string")
+        await api().subscriptions.delete({
+          feedIdList: feedIdList.length > 0 ? feedIdList : undefined,
+          listId: cloudListSubscriptions.at(0)?.listId || undefined,
+        })
       })
-    })
+    }
 
     tx.rollback((current) => {
       immerSet((draft) => {
@@ -541,6 +852,7 @@ class SubscriptionSyncService {
     category?: string | null
     view: FeedViewType
   }) {
+    const cloudMutationFeedIds = getAccountMutableFeedIds(feedIds)
     const current = feedIds
       .map((id) => get().data[id])
       .map((i) =>
@@ -572,13 +884,15 @@ class SubscriptionSyncService {
       })
     })
 
-    tx.request(async () => {
-      await api().subscriptions.batchUpdate({
-        feedIds,
-        category: newCategory,
-        view: newView,
+    if (cloudMutationFeedIds.length > 0) {
+      tx.request(async () => {
+        await api().subscriptions.batchUpdate({
+          feedIds: cloudMutationFeedIds,
+          category: newCategory,
+          view: newView,
+        })
       })
-    })
+    }
 
     tx.rollback(() => {
       immerSet((draft) => {
@@ -680,12 +994,16 @@ class SubscriptionSyncService {
       })
     })
 
-    tx.request(async () => {
-      await api().categories.delete({
-        feedIdList: feedIds,
-        deleteSubscriptions: false,
+    const cloudMutationFeedIds = getAccountMutableFeedIds(feedIds)
+
+    if (cloudMutationFeedIds.length > 0) {
+      tx.request(async () => {
+        await api().categories.delete({
+          feedIdList: cloudMutationFeedIds,
+          deleteSubscriptions: false,
+        })
       })
-    })
+    }
 
     tx.rollback(() => {
       immerSet((draft) => {
@@ -760,12 +1078,16 @@ class SubscriptionSyncService {
       })
     })
 
-    tx.request(async () => {
-      await api().categories.update({
-        feedIdList: feedIds,
-        category: newCategory,
+    const cloudMutationFeedIds = getAccountMutableFeedIds(feedIds)
+
+    if (cloudMutationFeedIds.length > 0) {
+      tx.request(async () => {
+        await api().categories.update({
+          feedIdList: cloudMutationFeedIds,
+          category: newCategory,
+        })
       })
-    })
+    }
 
     tx.rollback(() => {
       immerSet((draft) => {

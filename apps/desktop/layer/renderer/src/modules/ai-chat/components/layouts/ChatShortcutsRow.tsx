@@ -18,6 +18,7 @@ import {
 
 import type { ShortcutData } from "../../editor/plugins/shortcut/types"
 import { useMainEntryId } from "../../hooks/useMainEntryId"
+import { getAIShortcutDisplayName } from "../../utils/shortcut-display"
 import { AIShortcutButton } from "../ui/AIShortcutButton"
 import { ShortcutTooltip } from "../ui/ShortcutTooltip"
 
@@ -138,6 +139,7 @@ const ShortcutMenuButton: React.FC<ShortcutMenuButtonProps> = ({
   t,
 }) => {
   const showContextMenu = useShowContextMenu()
+  const displayName = getAIShortcutDisplayName(shortcut, t)
   const contextMenuProps = useContextMenu({
     onContextMenu: async (event) => {
       event.preventDefault()
@@ -174,18 +176,22 @@ const ShortcutMenuButton: React.FC<ShortcutMenuButtonProps> = ({
   return (
     <div {...contextMenuProps}>
       <ShortcutTooltip
-        name={shortcut.name}
+        name={displayName}
         prompt={shortcut.prompt || shortcut.defaultPrompt}
         hotkey={shortcut.hotkey}
       >
-        <AIShortcutButton onClick={() => onSelect(shortcut)} animationDelay={0} size="sm">
+        <AIShortcutButton
+          onClick={() => onSelect({ ...shortcut, name: displayName })}
+          animationDelay={0}
+          size="sm"
+        >
           <span className="flex items-center gap-1">
             {shortcut.icon ? (
               <i className={shortcut.icon} />
             ) : (
               <i className="i-mgc-hotkey-cute-re" />
             )}
-            <span>{shortcut.name}</span>
+            <span>{displayName}</span>
           </span>
         </AIShortcutButton>
       </ShortcutTooltip>

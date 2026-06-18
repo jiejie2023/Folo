@@ -98,8 +98,8 @@ export const APIProfileModalContent = ({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="min-w-[560px] space-y-4">
-      <div className="grid grid-cols-2 gap-4">
+    <form onSubmit={handleSubmit} className="w-[560px] max-w-[90vw] space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="local-ai-profile-name">{t("api_management.profile.form.name")}</Label>
           <Input
@@ -166,7 +166,7 @@ export const APIProfileModalContent = ({
         </p>
       </div>
 
-      <div className="grid grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <ModelInput
           label={t("api_management.profile.form.default_chat_model")}
           value={defaultChatModel}
@@ -199,7 +199,7 @@ export const APIProfileModalContent = ({
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-3 rounded-xl border border-fill-secondary p-3">
+      <div className="grid grid-cols-1 gap-3 rounded-xl border border-fill-secondary p-3 sm:grid-cols-2">
         <CapabilitySwitch
           checked={enabled}
           label={t("api_management.profile.form.enabled")}

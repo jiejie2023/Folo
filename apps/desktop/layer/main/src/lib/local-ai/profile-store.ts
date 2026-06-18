@@ -98,18 +98,18 @@ export const upsertLocalAIProfile = (input: LocalAIProfileUpsertInput): LocalAIS
   const profile: LocalAIStoredProfile = {
     baseURL: normalizeBaseURL(input.baseURL),
     createdAt: existing?.createdAt ?? now,
-    defaultChatModel: input.defaultChatModel,
-    defaultSummaryModel: input.defaultSummaryModel,
-    defaultTaskModel: input.defaultTaskModel,
-    defaultTimelineModel: input.defaultTimelineModel,
-    defaultTranslationModel: input.defaultTranslationModel,
-    defaultTtsModel: input.defaultTtsModel,
+    defaultChatModel: normalizeOptionalModel(input.defaultChatModel),
+    defaultSummaryModel: normalizeOptionalModel(input.defaultSummaryModel),
+    defaultTaskModel: normalizeOptionalModel(input.defaultTaskModel),
+    defaultTimelineModel: normalizeOptionalModel(input.defaultTimelineModel),
+    defaultTranslationModel: normalizeOptionalModel(input.defaultTranslationModel),
+    defaultTtsModel: normalizeOptionalModel(input.defaultTtsModel),
     enabled: input.enabled,
     headers: sanitizeHeaders(input.headers),
     id,
     lastTestedAt: existing?.lastTestedAt ?? null,
     lastTestResult: existing?.lastTestResult ?? null,
-    models: input.models,
+    models: input.models.map(normalizeModelId),
     name: input.name,
     providerType: input.providerType,
     supportsJsonMode: input.supportsJsonMode,
@@ -164,7 +164,7 @@ export const updateLocalAIProfileModels = (
 
   const updated: LocalAIStoredProfile = {
     ...existing,
-    models,
+    models: models.map(normalizeModelId),
     updatedAt: new Date().toISOString(),
   }
 
@@ -173,6 +173,11 @@ export const updateLocalAIProfileModels = (
 }
 
 const normalizeBaseURL = (baseURL: string): string => baseURL.trim().replace(/\/+$/, "")
+
+const normalizeModelId = (model: string): string => model.trim().replace(/^models\//i, "")
+
+const normalizeOptionalModel = (model: string | null): string | null =>
+  model ? normalizeModelId(model) : null
 
 const sanitizeHeaders = (headers: Record<string, string>): Record<string, string> =>
   Object.fromEntries(
@@ -197,7 +202,14 @@ const isSensitiveHeaderName = (headerName: string): boolean => {
 
 const sanitizeProfile = (profile: LocalAIStoredProfile): LocalAIStoredProfile => ({
   ...profile,
+  defaultChatModel: normalizeOptionalModel(profile.defaultChatModel),
+  defaultSummaryModel: normalizeOptionalModel(profile.defaultSummaryModel),
+  defaultTaskModel: normalizeOptionalModel(profile.defaultTaskModel),
+  defaultTimelineModel: normalizeOptionalModel(profile.defaultTimelineModel),
+  defaultTranslationModel: normalizeOptionalModel(profile.defaultTranslationModel),
+  defaultTtsModel: normalizeOptionalModel(profile.defaultTtsModel),
   headers: sanitizeHeaders(profile.headers),
+  models: profile.models.map(normalizeModelId),
 })
 
 const readProfiles = (): LocalAIStoredProfile[] =>

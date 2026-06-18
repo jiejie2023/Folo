@@ -61,8 +61,9 @@ export const APIManagementSection = () => {
     },
     onSuccess: async (_result, profileId) => {
       const latestSettings = getAISettings().localAI
-      if (latestSettings.defaultProfileId === profileId) {
-        setAISetting("localAI", clearDeletedLocalAIDefaultProfile(latestSettings, profileId))
+      const nextSettings = clearDeletedLocalAIDefaultProfile(latestSettings, profileId)
+      if (nextSettings !== latestSettings) {
+        setAISetting("localAI", nextSettings)
       }
       await queryClient.invalidateQueries({ queryKey: localAIQueryKeys.profiles })
       toast.success(t("api_management.profile.deleted"))
@@ -138,9 +139,14 @@ export const APIManagementSection = () => {
       </div>
 
       <div className="space-y-2">
-        <Label className="text-sm font-medium text-text">
-          {t("api_management.default_profile")}
-        </Label>
+        <div className="space-y-1">
+          <Label className="text-sm font-medium text-text">
+            {t("api_management.default_profile")}
+          </Label>
+          <p className="text-xs text-text-secondary">
+            {t("api_management.default_profile_description")}
+          </p>
+        </div>
         <Select
           value={localAI.defaultProfileId ?? NO_PROFILE_VALUE}
           onValueChange={(value) =>

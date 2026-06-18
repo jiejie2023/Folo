@@ -63,8 +63,8 @@ const ShortcutSuggestionItem = React.memo(
 
     const { shortcuts } = useAISettingValue()
     const matched = React.useMemo(() => {
-      return shortcuts.find((s) => s.name === shortcut.name)
-    }, [shortcuts, shortcut.name])
+      return shortcuts.find((s) => s.id === shortcut.id)
+    }, [shortcuts, shortcut.id])
 
     return (
       <div

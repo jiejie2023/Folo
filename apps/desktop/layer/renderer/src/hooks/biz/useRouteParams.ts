@@ -17,6 +17,7 @@ import {
   ROUTE_FEED_IN_LIST,
   ROUTE_FEED_PENDING,
   ROUTE_TIMELINE_OF_VIEW,
+  ROUTE_TIMELINE_SYNCED,
   ROUTE_VIEW_ALL,
 } from "~/constants"
 
@@ -41,6 +42,7 @@ export interface BizRouteParams {
   inboxId?: string
   listId?: string
   timelineId?: string
+  isSyncedTimeline: boolean
 }
 
 const VIEW_SLUG_BY_VIEW: Record<FeedViewType, string> = {
@@ -105,7 +107,10 @@ const parseRouteParams = (params: Params<any>, _searchParams: URLSearchParams): 
   const list = listId ? getListById(listId) : undefined
 
   return {
-    view: parseView(params.timelineId) ?? list?.view ?? FeedViewType.Articles,
+    view:
+      params.timelineId === ROUTE_TIMELINE_SYNCED
+        ? FeedViewType.All
+        : (parseView(params.timelineId) ?? list?.view ?? FeedViewType.Articles),
     entryId: params.entryId || undefined,
     feedId: params.feedId || undefined,
     // alias
@@ -120,6 +125,7 @@ const parseRouteParams = (params: Params<any>, _searchParams: URLSearchParams): 
       : undefined,
     listId,
     timelineId: params.timelineId,
+    isSyncedTimeline: params.timelineId === ROUTE_TIMELINE_SYNCED,
   }
 }
 

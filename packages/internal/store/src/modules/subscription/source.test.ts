@@ -9,17 +9,17 @@ import {
 } from "./source"
 
 describe("subscription source helpers", () => {
-  test("defaults missing source to cloud for backward compatibility", () => {
-    expect(getSubscriptionSource({})).toBe("cloud")
-    expect(getSubscriptionSource({ source: null })).toBe("cloud")
-    expect(DEFAULT_SUBSCRIPTION_SOURCE).toBe("cloud")
+  test("defaults missing source to local for the desktop local-first model", () => {
+    expect(getSubscriptionSource({})).toBe("local")
+    expect(getSubscriptionSource({ source: null })).toBe("local")
+    expect(DEFAULT_SUBSCRIPTION_SOURCE).toBe("local")
   })
 
   test("recognizes local and cloud subscriptions", () => {
     expect(isLocalSubscription({ source: "local" })).toBe(true)
     expect(isLocalSubscription({ source: "cloud" })).toBe(false)
     expect(isCloudSubscription({ source: "cloud" })).toBe(true)
-    expect(isCloudSubscription({})).toBe(true)
+    expect(isCloudSubscription({})).toBe(false)
   })
 
   test("narrows subscription source literals", () => {

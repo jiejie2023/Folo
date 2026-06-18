@@ -184,9 +184,9 @@ const Content: FC<{
       <ScrollArea.ScrollArea
         mask={false}
         ref={setScroller}
-        rootClassName="h-full grow flex-1 shrink-0 overflow-auto"
+        rootClassName="h-full min-w-0 grow flex-1 shrink-0 overflow-auto"
         viewportClassName={cn(
-          "px-1 min-h-full [&>div]:min-h-full [&>div]:relative pl-8 pr-7",
+          "min-h-full w-full min-w-0 max-w-full px-1 pl-8 pr-7 [&>div]:!block [&>div]:!w-full [&>div]:!max-w-full [&>div]:relative [&>div]:min-h-full [&>div]:min-w-0",
           config.viewportClassName,
         )}
       >

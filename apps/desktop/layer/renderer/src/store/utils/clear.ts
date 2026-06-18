@@ -9,9 +9,5 @@ export const clearLocalPersistStoreData = async () => {
 
 const storedUserId = getStorageNS("user_id")
 export const clearDataIfLoginOtherAccount = (newUserId: string) => {
-  const oldUserId = localStorage.getItem(storedUserId)
   localStorage.setItem(storedUserId, newUserId)
-  if (oldUserId !== newUserId) {
-    return clearLocalPersistStoreData()
-  }
 }

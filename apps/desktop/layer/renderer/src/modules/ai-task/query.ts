@@ -4,8 +4,8 @@ import type { LocalAITask } from "@follow/shared/settings/interface"
 import type {
   AITask,
   CreateTaskRequest,
-  TaskDeleteResponse,
   TaskCreateResponse,
+  TaskDeleteResponse,
   TaskGetResponse,
   TaskTestRunResponse,
   TaskUpdateResponse,

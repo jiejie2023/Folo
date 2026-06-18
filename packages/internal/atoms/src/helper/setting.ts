@@ -23,6 +23,13 @@ declare module "@follow/utils/event-bus" {
 export const createSettingAtom = <T extends object>(
   settingKey: string,
   createDefaultSettings: () => T,
+  options: {
+    canAccessPaidSetting?: (input: {
+      key: string
+      requiredLevel: SettingPaidLevels
+      settingKey: string
+    }) => boolean
+  } = {},
 ) => {
   const atom = atomWithStorage(getStorageNS(settingKey), createDefaultSettings(), undefined, {
     getOnInit: true,
@@ -42,12 +49,15 @@ export const createSettingAtom = <T extends object>(
 
   const noopAtom = jotaiAtom(null)
 
-  const canUpdatePaidSetting = (requiredLevel?: SettingPaidLevels) => {
+  const canUpdatePaidSetting = (key: string, requiredLevel?: SettingPaidLevels) => {
     if (requiredLevel === undefined) return true
     if (
       requiredLevel === SettingPaidLevels.Free ||
       requiredLevel === SettingPaidLevels.FreeLimited
     ) {
+      return true
+    }
+    if (options.canAccessPaidSetting?.({ key, requiredLevel, settingKey })) {
       return true
     }
     const role = useUserStore.getState().role ?? UserRole.Free
@@ -60,7 +70,7 @@ export const createSettingAtom = <T extends object>(
     defaults: Record<string, unknown>,
   ) => {
     const requiredLevel = getSettingPaidLevel(settingKey, key)
-    if (requiredLevel === undefined || canUpdatePaidSetting(requiredLevel)) {
+    if (requiredLevel === undefined || canUpdatePaidSetting(key, requiredLevel)) {
       return value
     }
     if (Object.prototype.hasOwnProperty.call(defaults, key)) {
@@ -177,7 +187,7 @@ export const createSettingAtom = <T extends object>(
     value: ReturnType<typeof getSettingsRaw>[K],
   ) => {
     const requiredLevel = getSettingPaidLevel(settingKey, String(key))
-    if (!canUpdatePaidSetting(requiredLevel)) {
+    if (!canUpdatePaidSetting(String(key), requiredLevel)) {
       return
     }
     const updated = Date.now()

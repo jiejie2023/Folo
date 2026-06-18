@@ -143,6 +143,10 @@ export class AuthService extends IpcService {
 
   @IpcMethod()
   async sessionChanged(_context: IpcContext, preferredToken?: string): Promise<void> {
+    if (preferredToken) {
+      await this.applySessionToken(preferredToken)
+    }
+
     await updateNotificationsToken()
 
     // Sync the current desktop session to the npm CLI login.

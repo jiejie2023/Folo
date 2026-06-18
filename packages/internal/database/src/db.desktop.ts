@@ -76,10 +76,8 @@ export async function migrateDB() {
   try {
     await migrate(db, migrations)
   } catch (error) {
-    console.error("Failed to migrate database:", error)
-
-    await deleteDB()
-    await migrate(db, migrations)
+    console.error("Failed to migrate database; local database was preserved:", error)
+    throw error
   }
 }
 export async function getDBFile() {

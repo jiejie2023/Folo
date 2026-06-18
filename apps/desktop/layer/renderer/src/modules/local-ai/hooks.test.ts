@@ -12,7 +12,11 @@ import {
   resolveLocalAITaskModelPurpose,
 } from "./hooks"
 
-const createSettings = (overrides: Partial<LocalAISettings> = {}): LocalAISettings => ({
+type TestLocalAISettings = LocalAISettings & {
+  featureProfileIds?: Partial<Record<string, string | null>>
+}
+
+const createSettings = (overrides: Partial<TestLocalAISettings> = {}): TestLocalAISettings => ({
   allowFallbackToCloud: false,
   defaultProfileId: "profile-1",
   enabled: true,
@@ -83,6 +87,32 @@ describe("resolveLocalAIProfileId", () => {
     expect(resolveLocalAIProfileId(createSettings(), "summary")).toBe("profile-1")
   })
 
+  test("prefers a feature-specific profile id over the default profile", () => {
+    expect(
+      resolveLocalAIProfileId(
+        createSettings({
+          featureProfileIds: {
+            summary: "profile-2",
+          },
+        }) as LocalAISettings,
+        "summary",
+      ),
+    ).toBe("profile-2")
+  })
+
+  test("falls back to the default profile when a feature-specific profile id is missing", () => {
+    expect(
+      resolveLocalAIProfileId(
+        createSettings({
+          featureProfileIds: {
+            chat: "profile-2",
+          },
+        }) as LocalAISettings,
+        "summary",
+      ),
+    ).toBe("profile-1")
+  })
+
   test("returns null when local AI is disabled", () => {
     expect(resolveLocalAIProfileId(createSettings({ enabled: false }), "summary")).toBeNull()
   })
@@ -114,6 +144,40 @@ describe("resolveLocalAIProfileModel", () => {
         "summary",
       ),
     ).toBe("summary-model")
+  })
+
+  test("falls back to a discovered model when the configured model is unavailable", () => {
+    expect(
+      resolveLocalAIProfileModel(
+        {
+          defaultChatModel: "Qwen3.6-35B-A3B",
+          defaultSummaryModel: null,
+          defaultTaskModel: null,
+          defaultTimelineModel: null,
+          defaultTranslationModel: null,
+          defaultTtsModel: null,
+          models: ["xopqwen36v35b"],
+        },
+        "chat",
+      ),
+    ).toBe("xopqwen36v35b")
+  })
+
+  test("treats Google-discovered model ids as matching normalized defaults", () => {
+    expect(
+      resolveLocalAIProfileModel(
+        {
+          defaultChatModel: "gemini-3.5-flash",
+          defaultSummaryModel: null,
+          defaultTaskModel: null,
+          defaultTimelineModel: null,
+          defaultTranslationModel: null,
+          defaultTtsModel: null,
+          models: ["models/gemini-3.5-flash"],
+        },
+        "chat",
+      ),
+    ).toBe("gemini-3.5-flash")
   })
 
   test("throws when no model is configured", () => {

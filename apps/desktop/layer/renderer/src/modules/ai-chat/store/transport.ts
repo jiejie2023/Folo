@@ -3,11 +3,13 @@ import type { LocalAIFeature } from "@follow/shared/settings/interface"
 import type { ChatTransport, HttpChatTransportInitOptions, UIMessageChunk } from "ai"
 import { HttpChatTransport, parseJsonEventStream, uiMessageChunkSchema } from "ai"
 
+import { getActionLanguage } from "~/atoms/settings/general"
 import { createLocalAIChatTransport } from "~/modules/local-ai/chat-transport"
 import { getLocalAIProfileId } from "~/modules/local-ai/hooks"
 
 import { getAIModelState } from "../atoms/session"
 import { AIPersistService } from "../services"
+import { TIMELINE_SUMMARY_SCENE } from "../utils/timeline-summary"
 import type { BizUIMessage } from "./types"
 
 type TitleHandlerPersistOption = boolean | ((title: string) => void | Promise<void>)
@@ -111,6 +113,9 @@ const resolveLocalAITransportFeature = (
       return feature as LocalAIFeature
     }
   }
+  if (isRecord(body) && body.scene === TIMELINE_SUMMARY_SCENE) {
+    return "timelineSummary"
+  }
 
   return "chat"
 }
@@ -130,7 +135,10 @@ const createCloudChatTransport = ({ onValue, titleHandler }: CreateChatTransport
       const modelState = getAIModelState()
       const { selectedModel } = modelState
 
-      return selectedModel ? { model: selectedModel } : {}
+      return {
+        language: getActionLanguage(),
+        ...(selectedModel ? { model: selectedModel } : {}),
+      }
     },
   })
 

@@ -12,7 +12,7 @@ import {
 import { entryActions, entrySyncServices, useEntryStore } from "@follow/store/entry/store"
 import type { UseEntriesReturn } from "@follow/store/entry/types"
 import { fallbackReturn } from "@follow/store/entry/utils"
-import { useFolderFeedsByFeedId } from "@follow/store/subscription/hooks"
+import { useFolderFeedsByFeedId, useSyncedFeedIds } from "@follow/store/subscription/hooks"
 import { unreadSyncService } from "@follow/store/unread/store"
 import { nextFrame } from "@follow/utils"
 import { isBizId } from "@follow/utils/utils"
@@ -21,18 +21,20 @@ import { debounce } from "es-toolkit/compat"
 import { useAtomValue } from "jotai"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
-import { useGeneralSettingKey } from "~/atoms/settings/general"
 import { useAISettingKey } from "~/atoms/settings/ai"
+import { useGeneralSettingKey } from "~/atoms/settings/general"
 import { ROUTE_FEED_PENDING } from "~/constants/app"
 import { useFeature } from "~/hooks/biz/useFeature"
 import { useRouteParams } from "~/hooks/biz/useRouteParams"
+import { useLocalAIProfileId } from "~/modules/local-ai/hooks"
 
 import { aiTimelineEnabledAtom } from "../atoms/ai-timeline"
 import { getVisibleLocalEntryIds } from "./filter-local-entry-ids"
+import { canUseTimelineAI } from "./timeline-ai-availability"
 import { useIsPreviewFeed } from "./useIsPreviewFeed"
 
 const useRemoteEntries = (): UseEntriesReturn => {
-  const { feedId, view, inboxId, listId } = useRouteParams()
+  const { feedId, view, inboxId, listId, isSyncedTimeline } = useRouteParams()
   const isPreview = useIsPreviewFeed()
 
   const unreadOnly = useGeneralSettingKey("unreadOnly")
@@ -41,14 +43,24 @@ const useRemoteEntries = (): UseEntriesReturn => {
   )
   const aiTimelineEnabled = useAtomValue(aiTimelineEnabledAtom)
   const aiEnabled = useFeature("ai")
+  const localTimelineRankingProfileId = useLocalAIProfileId("timelineRanking")
+  const canUseAiTimeline = canUseTimelineAI({
+    aiEnabled,
+    localProfileId: localTimelineRankingProfileId,
+  })
   const aiTimelinePrompt = useAISettingKey("aiTimelinePrompt")
 
   const folderIds = useFolderFeedsByFeedId({
     feedId,
     view,
   })
+  const syncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const shouldFilterSynced =
+    isSyncedTimeline && (!feedId || feedId === ROUTE_FEED_PENDING) && !inboxId && !listId
 
   const entriesOptions = useMemo(() => {
+    if (shouldFilterSynced && syncedFeedIds.length === 0) return
+
     const params = {
       feedId: folderIds?.join(",") || feedId,
       inboxId,
@@ -59,8 +71,9 @@ const useRemoteEntries = (): UseEntriesReturn => {
         hidePrivateSubscriptionsInTimeline: true,
       }),
       ...(view === FeedViewType.All && { limit: 40 }),
-      ...(aiTimelineEnabled && aiEnabled && { aiSort: true }),
-      ...(aiTimelineEnabled && aiEnabled && { aiTimelinePrompt }),
+      ...(aiTimelineEnabled && canUseAiTimeline && { aiSort: true }),
+      ...(aiTimelineEnabled && canUseAiTimeline && { aiTimelinePrompt }),
+      ...(shouldFilterSynced && { feedIdList: syncedFeedIds }),
     }
 
     if (feedId && listId && isBizId(feedId)) {
@@ -78,8 +91,10 @@ const useRemoteEntries = (): UseEntriesReturn => {
     view,
     hidePrivateSubscriptionsInTimeline,
     aiTimelineEnabled,
-    aiEnabled,
+    canUseAiTimeline,
     aiTimelinePrompt,
+    shouldFilterSynced,
+    syncedFeedIds,
   ])
   const query = useEntriesQuery(entriesOptions)
 
@@ -119,7 +134,7 @@ function getEntryIdsFromMultiplePlace(...entryIds: Array<string[] | undefined | 
 }
 
 const useLocalEntries = (): UseEntriesReturn => {
-  const { feedId, view, inboxId, listId, isCollection } = useRouteParams()
+  const { feedId, view, inboxId, listId, isCollection, isSyncedTimeline } = useRouteParams()
   const unreadOnly = useGeneralSettingKey("unreadOnly")
   const hidePrivateSubscriptionsInTimeline = useGeneralSettingKey(
     "hidePrivateSubscriptionsInTimeline",
@@ -130,6 +145,8 @@ const useLocalEntries = (): UseEntriesReturn => {
     view,
   })
   const entryIdsByView = useEntryIdsByView(view, hidePrivateSubscriptionsInTimeline)
+  const syncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const entryIdsBySyncedFeeds = useEntryIdsByFeedIds(syncedFeedIds)
   const entryIdsByCollections = useCollectionEntryList(view)
   const entryIdsByFeedId = useEntryIdsByFeedId(feedId)
   const entryIdsByCategory = useEntryIdsByFeedIds(folderIds)
@@ -144,8 +161,16 @@ const useLocalEntries = (): UseEntriesReturn => {
     !listId
 
   const localQueryKey = useMemo(
-    () => [feedId || "", view, inboxId || "", listId || "", isCollection ? "1" : "0"].join(":"),
-    [feedId, inboxId, isCollection, listId, view],
+    () =>
+      [
+        feedId || "",
+        view,
+        inboxId || "",
+        listId || "",
+        isCollection ? "1" : "0",
+        isSyncedTimeline ? syncedFeedIds.join(",") : "",
+      ].join(":"),
+    [feedId, inboxId, isCollection, isSyncedTimeline, listId, syncedFeedIds, view],
   )
   const stickyVisibleStateRef = useRef<{
     queryKey: string
@@ -161,7 +186,9 @@ const useLocalEntries = (): UseEntriesReturn => {
         const ids = isCollection
           ? entryIdsByCollections
           : showEntriesByView
-            ? (entryIdsByView ?? [])
+            ? isSyncedTimeline
+              ? (entryIdsBySyncedFeeds ?? [])
+              : (entryIdsByView ?? [])
             : (getEntryIdsFromMultiplePlace(
                 entryIdsByFeedId,
                 entryIdsByCategory,
@@ -188,7 +215,9 @@ const useLocalEntries = (): UseEntriesReturn => {
         entryIdsByInboxId,
         entryIdsByListId,
         entryIdsByView,
+        entryIdsBySyncedFeeds,
         isCollection,
+        isSyncedTimeline,
         localQueryKey,
         showEntriesByView,
         unreadOnly,
@@ -231,7 +260,7 @@ const useLocalEntries = (): UseEntriesReturn => {
 
   useEffect(() => {
     setPage(0)
-  }, [view, feedId])
+  }, [view, feedId, isSyncedTimeline])
 
   return {
     entriesIds: entries,

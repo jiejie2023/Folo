@@ -13,7 +13,7 @@ import * as React from "react"
 
 import { ShortcutComponent } from "./components/ShortcutComponent"
 import type { ShortcutData } from "./types"
-import { getShortcutTextValue } from "./utils/shortcutTextValue"
+import { getShortcutDisplayTextValue, getShortcutTextValue } from "./utils/shortcutTextValue"
 
 export type SerializedShortcutNode = Spread<
   {
@@ -76,7 +76,7 @@ export class ShortcutNode extends DecoratorNode<React.JSX.Element> {
     const element = document.createElement("span")
     element.dataset.lexicalShortcut = "true"
     element.dataset.shortcutId = this.__shortcutData.id
-    element.textContent = `/${this.__shortcutData.name}`
+    element.textContent = `/${getShortcutDisplayTextValue(this.__shortcutData)}`
     element.className = "shortcut-node"
     return { element }
   }

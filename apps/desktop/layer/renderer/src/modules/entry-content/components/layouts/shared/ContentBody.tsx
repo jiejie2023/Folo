@@ -1,10 +1,13 @@
 import { useEntry } from "@follow/store/entry/hooks"
 import { cn } from "@follow/utils/utils"
 
+import { useGeneralSettingKey } from "~/atoms/settings/general"
 import { useSpotlightSettingKey } from "~/atoms/settings/spotlight"
 import { HTML } from "~/components/ui/markdown/HTML"
 import { readableContentMaxWidthClassName } from "~/constants/ui"
 import { useRenderStyle } from "~/hooks/biz/useRenderStyle"
+
+import { useStableTranslatedContent } from "./use-stable-translated-content"
 
 interface ContentBodyProps {
   entryId: string
@@ -33,11 +36,17 @@ export const ContentBody: React.FC<ContentBodyProps> = ({
     baseFontSize: compact ? 14 : 16,
     baseLineHeight: compact ? 1.625 : 1.7,
   })
+  const translationMode = useGeneralSettingKey("translationMode")
   const spotlightRules = useSpotlightSettingKey("spotlights")
 
-  if (!entry) return null
+  const content = useStableTranslatedContent({
+    format: "html",
+    mode: translationMode,
+    source: entry?.content || entry?.description,
+    target: translation?.content,
+  })
 
-  const content = translation?.content || entry.content || entry.description
+  if (!entry) return null
 
   if (!content) return null
 

@@ -149,11 +149,14 @@ const EntryContentImpl: Component<EntryContentProps> = ({
     () =>
       entryTranslation
         ? {
-            content: entryTranslation.content ?? undefined,
+            content:
+              (isInReadabilityMode
+                ? entryTranslation.readabilityContent
+                : entryTranslation.content) ?? undefined,
             title: entryTranslation.title ?? undefined,
           }
         : undefined,
-    [entryTranslation],
+    [entryTranslation, isInReadabilityMode],
   )
   return (
     <div className={cn(className, "flex flex-col @container")}>

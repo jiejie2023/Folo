@@ -61,6 +61,14 @@ const profile: DesktopLocalAIProfile = {
   updatedAt: "2026-06-14T00:00:00.000Z",
 }
 
+const alternateProfile: DesktopLocalAIProfile = {
+  ...profile,
+  defaultChatModel: "qwen-max",
+  id: "profile-2",
+  models: ["qwen-max", "qwen-plus"],
+  name: "Alternate Local",
+}
+
 const createWrapper = () => {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -132,6 +140,7 @@ const localAISettings = {
   allowFallbackToCloud: false,
   defaultProfileId: "profile-1",
   enabled: true,
+  featureProfileIds: {},
   featureRouting: {
     chat: "local",
     mcp: "cloud",
@@ -152,7 +161,7 @@ describe("useAIConfiguration", () => {
     window.removeEventListener = vi.fn()
     mocks.getAISettings.mockReturnValue({ localAI: localAISettings })
     mocks.getLocalAIIPC.mockReturnValue({
-      listProfiles: vi.fn().mockResolvedValue([profile]),
+      listProfiles: vi.fn().mockResolvedValue([profile, alternateProfile]),
     })
     mocks.followConfig.mockResolvedValue({
       attachmentLimits: {
@@ -219,6 +228,32 @@ describe("useAIConfiguration", () => {
 
     expect(result.current.data?.defaultModel).toBe("openai/gpt-4o")
     expect(mocks.followConfig).toHaveBeenCalledTimes(1)
+    result.unmount()
+  })
+
+  it("uses the feature-specific local profile when chat is bound to another provider", async () => {
+    mocks.getAISettings.mockReturnValue({
+      localAI: {
+        ...localAISettings,
+        featureProfileIds: {
+          chat: "profile-2",
+        },
+      },
+    })
+
+    const result = renderUseAIConfiguration()
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true))
+
+    expect(result.current.data).toMatchObject({
+      availableModels: ["qwen-max", "qwen-plus"],
+      availableModelsMenu: [
+        { label: "qwen-max", value: "qwen-max" },
+        { label: "qwen-plus", value: "qwen-plus" },
+      ],
+      defaultModel: "qwen-max",
+    })
+    expect(mocks.followConfig).not.toHaveBeenCalled()
     result.unmount()
   })
 

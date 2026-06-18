@@ -186,6 +186,17 @@ export const defaultAISettings: AISettings = {
       tasks: "cloud",
       mcp: "cloud",
     },
+    featureProfileIds: {
+      chat: null,
+      summary: null,
+      translation: null,
+      timelineSummary: null,
+      timelineRanking: null,
+      onboardingRecommendations: null,
+      tts: null,
+      tasks: null,
+      mcp: null,
+    },
     allowFallbackToCloud: false,
   },
 
