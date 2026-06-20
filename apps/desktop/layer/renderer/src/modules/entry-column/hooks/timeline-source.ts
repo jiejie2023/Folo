@@ -51,3 +51,25 @@ export const mergeEntryIds = (
 
   return merged
 }
+
+export const getTimelineDisplayEntryIds = ({
+  localEntryIds,
+}: {
+  localEntryIds: string[]
+  remoteEntryIds: string[]
+}) => localEntryIds
+
+export const getTimelinePagination = ({
+  localHasNext,
+  remoteHasNext,
+}: {
+  localHasNext: boolean
+  remoteHasNext: boolean
+}) => {
+  const hasNext = localHasNext || remoteHasNext
+
+  return {
+    hasNext,
+    hasNextPage: hasNext,
+  }
+}

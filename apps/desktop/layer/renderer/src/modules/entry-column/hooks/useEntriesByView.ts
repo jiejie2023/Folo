@@ -36,7 +36,13 @@ import { useLocalAIProfileId } from "~/modules/local-ai/hooks"
 import { aiTimelineEnabledAtom } from "../atoms/ai-timeline"
 import { getVisibleLocalEntryIds } from "./filter-local-entry-ids"
 import { canUseTimelineAI } from "./timeline-ai-availability"
-import { getTimelineFolderFeedIds, mergeEntryIds, shouldUseViewFeedIds } from "./timeline-source"
+import {
+  getTimelineDisplayEntryIds,
+  getTimelineFolderFeedIds,
+  getTimelinePagination,
+  mergeEntryIds,
+  shouldUseViewFeedIds,
+} from "./timeline-source"
 import { useIsPreviewFeed } from "./useIsPreviewFeed"
 
 const useTimelineViewSourceIds = (view: FeedViewType, excludePrivate: boolean) => {
@@ -369,18 +375,30 @@ export const useEntriesByView = ({ onReset }: { onReset?: () => void }) => {
 
   const remoteQuery = useRemoteEntries()
   const localQuery = useLocalEntries()
+  const { fetchNextPage: fetchLocalNextPage, refetch: refetchLocalEntries } = localQuery
+  const { fetchNextPage: fetchRemoteNextPage, refetch: refetchRemoteEntries } = remoteQuery
 
   useFetchEntryContentByStream(remoteQuery.entriesIds)
 
-  // If remote data is not available, we use the local data, get the local data length
-  // FIXME: remote first, then local store data
-  // NOTE: We still can't use the store's data handling directly.
-  // Imagine that the local data may be persistent, and then if there are incremental updates to the data on the server side,
-  // then we have no way to incrementally update the data.
-  // We need to add an interface to incrementally update the data based on the version hash.
-
   const query = remoteQuery.isReady ? remoteQuery : localQuery
-  const entryIds: string[] = query.entriesIds
+  const entryIds = getTimelineDisplayEntryIds({
+    localEntryIds: localQuery.entriesIds,
+    remoteEntryIds: remoteQuery.entriesIds,
+  })
+  const pagination = getTimelinePagination({
+    localHasNext: localQuery.hasNext,
+    remoteHasNext: remoteQuery.hasNext,
+  })
+  const fetchNextPage = useCallback(() => {
+    void fetchLocalNextPage()
+    return fetchRemoteNextPage()
+  }, [fetchLocalNextPage, fetchRemoteNextPage])
+  const refetch = useCallback(() => {
+    void refetchLocalEntries()
+    const promise = refetchRemoteEntries()
+    unreadSyncService.resetFromRemote()
+    return promise
+  }, [refetchLocalEntries, refetchRemoteEntries])
 
   const isFetchingFirstPage = remoteQuery.isFetching && !remoteQuery.isFetchingNextPage
 
@@ -429,16 +447,15 @@ export const useEntriesByView = ({ onReset }: { onReset?: () => void }) => {
     ...query,
 
     type: remoteQuery.isReady ? ("remote" as const) : ("local" as const),
-    refetch: useCallback(() => {
-      const promise = query.refetch()
-      unreadSyncService.resetFromRemote()
-      return promise
-    }, [query]),
+    refetch,
+    fetchNextPage,
     entriesIds: entryIds,
     groupedCounts,
+    hasNext: pagination.hasNext,
+    hasNextPage: pagination.hasNextPage,
     isFetching: remoteQuery.isFetching,
     isFetchingNextPage: remoteQuery.isFetchingNextPage,
-    isLoading: remoteQuery.isLoading,
+    isLoading: remoteQuery.isLoading && entryIds.length === 0,
   }
 }
 

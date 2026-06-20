@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest"
 
 import { ROUTE_FEED_PENDING } from "~/constants/app"
 
-import { getTimelineFolderFeedIds, mergeEntryIds, shouldUseViewFeedIds } from "./timeline-source"
+import {
+  getTimelineDisplayEntryIds,
+  getTimelineFolderFeedIds,
+  getTimelinePagination,
+  mergeEntryIds,
+  shouldUseViewFeedIds,
+} from "./timeline-source"
 
 describe("timeline source selection", () => {
   it.each([
@@ -89,5 +95,26 @@ describe("timeline source selection", () => {
       "entry-1",
       "entry-3",
     ])
+  })
+
+  it("keeps every locally eligible entry when a remote page is partial", () => {
+    expect(
+      getTimelineDisplayEntryIds({
+        localEntryIds: ["local-new", "local-old"],
+        remoteEntryIds: ["remote-only"],
+      }),
+    ).toEqual(["local-new", "local-old"])
+  })
+
+  it("keeps pagination available while either local or remote data has another page", () => {
+    expect(
+      getTimelinePagination({
+        localHasNext: false,
+        remoteHasNext: true,
+      }),
+    ).toEqual({
+      hasNext: true,
+      hasNextPage: true,
+    })
   })
 })
