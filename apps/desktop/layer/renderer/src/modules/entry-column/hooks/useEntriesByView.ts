@@ -336,16 +336,18 @@ const useLocalEntries = (): UseEntriesReturn => {
     setPage(0)
   }, [])
 
-  const fetchNextPage = useCallback(
-    debounce(async () => {
-      setPage(page + 1)
-    }, 300),
-    [page],
+  const fetchNextPage = useMemo(
+    () =>
+      debounce(async () => {
+        setPage((currentPage) => currentPage + 1)
+      }, 300),
+    [],
   )
 
   useEffect(() => {
+    fetchNextPage.cancel()
     setPage(0)
-  }, [view, feedId, isSyncedTimeline])
+  }, [feedId, fetchNextPage, isSyncedTimeline, view])
 
   return {
     entriesIds: entries,
@@ -388,7 +390,7 @@ export const useEntriesByView = ({ onReset }: { onReset?: () => void }) => {
         onReset?.()
       })
     }
-  }, [isFetchingFirstPage, query.queryKey])
+  }, [isFetchingFirstPage, onReset, query.queryKey])
 
   const groupByDate = useGeneralSettingKey("groupByDate")
   const groupedCounts: number[] | undefined = useMemo(() => {
