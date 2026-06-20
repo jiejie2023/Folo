@@ -33,9 +33,15 @@ import { useSettingModal } from "~/modules/settings/modal/useSettingModal"
 import { WindowUnderBlur } from "../../components/ui/background"
 import { COMMAND_ID } from "../command/commands/id"
 import { useCommandBinding } from "../command/hooks/use-command-binding"
-import { getSelectedFeedIds, resetSelectedFeedIds, setSelectedFeedIds } from "./atom"
+import {
+  getSelectedFeedIds,
+  resetSelectedFeedIds,
+  setSelectedFeedIds,
+  useSubscriptionSearchState,
+} from "./atom"
 import { useShouldFreeUpSpace } from "./hook"
 import { SubscriptionListGuard } from "./subscription-list/SubscriptionListGuard"
+import { resetSubscriptionSearchForScope } from "./subscription-search-state"
 import { insertSyncedTimeline } from "./subscription-timeline"
 import { SubscriptionColumnHeader } from "./SubscriptionColumnHeader"
 import { SubscriptionTabButton } from "./SubscriptionTabButton"
@@ -48,8 +54,9 @@ export function SubscriptionColumn({
 }: PropsWithChildren<{ className?: string }>) {
   const { isLoading: isSubscriptionLoading } = usePrefetchSubscription()
   usePrefetchUnread()
-
   const carouselRef = useRef<HTMLDivElement>(null)
+  const [subscriptionSearchState, setSubscriptionSearchState] = useSubscriptionSearchState()
+  const { isOpen: isSearchOpen, query: feedSearchQuery } = subscriptionSearchState
   const visibleTimelineList = useTimelineList({
     withAll: true,
     visible: true,
@@ -64,6 +71,19 @@ export function SubscriptionColumn({
     view: s.view,
     listId: s.listId,
   }))
+  const searchScopeRef = useRef<string | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    const nextScope = `${routeParams.timelineId ?? ""}:${routeParams.view}`
+    const previousScope = searchScopeRef.current
+    searchScopeRef.current = nextScope
+
+    if (!previousScope) return
+
+    setSubscriptionSearchState((state) =>
+      resetSubscriptionSearchForScope({ previousScope, nextScope, state }),
+    )
+  }, [routeParams.timelineId, routeParams.view, setSubscriptionSearchState])
 
   const [timelineId, setMemoizedTimelineId] = useState(routeParams.timelineId ?? timelineList[0])
 
@@ -119,7 +139,6 @@ export function SubscriptionColumn({
     if (!focusableContainerRef.current) return
     focusableContainerRef.current.focus()
   }, [])
-
   return (
     <WindowUnderBlur
       as={Focusable}
@@ -180,6 +199,7 @@ export function SubscriptionColumn({
                     : (parseView(timelineId) ?? FeedViewType.Articles)
                 }
                 isSubscriptionLoading={isSubscriptionLoading}
+                feedSearchQuery={isSearchOpen ? feedSearchQuery : ""}
               />
             </section>
           ))}

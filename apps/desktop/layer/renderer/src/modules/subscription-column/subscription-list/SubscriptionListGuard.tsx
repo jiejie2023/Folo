@@ -4,7 +4,7 @@ import { cn } from "@follow/utils"
 import { SubscriptionList as FeedListDesktop } from "./SubscriptionList"
 
 export const SubscriptionListGuard = function SubscriptionListGuard(props: SubscriptionProps) {
-  const { ref, className, view, isSubscriptionLoading } = props
+  const { ref, className, view, isSubscriptionLoading, feedSearchQuery } = props
 
   if (typeof view !== "number") {
     return null
@@ -15,12 +15,18 @@ export const SubscriptionListGuard = function SubscriptionListGuard(props: Subsc
       view={view}
       ref={ref}
       isSubscriptionLoading={isSubscriptionLoading}
+      feedSearchQuery={feedSearchQuery}
     />
   )
 }
 
 export type SubscriptionProps = ComponentType<
-  { className?: string; view: FeedViewType; isSubscriptionLoading: boolean } & {
+  {
+    className?: string
+    view: FeedViewType
+    isSubscriptionLoading: boolean
+    feedSearchQuery?: string
+  } & {
     ref?: React.Ref<HTMLDivElement | null> | ((node: HTMLDivElement | null) => void)
   }
 >

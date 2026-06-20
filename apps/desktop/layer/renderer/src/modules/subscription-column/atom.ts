@@ -4,6 +4,9 @@ import { atomWithStorage } from "jotai/utils"
 
 import { createAtomHooks } from "~/lib/jotai"
 
+import type { SubscriptionSearchState } from "./subscription-search-state"
+import { closeSubscriptionSearch, openSubscriptionSearch } from "./subscription-search-state"
+
 export type FeedListSortBy = "count" | "alphabetical"
 export type FeedListSortOrder = "asc" | "desc"
 const [, , useFeedListSort, , getFeedListSort, setFeedListSort, useFeedListSortSelector] =
@@ -44,3 +47,16 @@ export const resetSelectedFeedIds = () => {
 
 export const [, , useFeedAreaScrollProgressValue, , , setFeedAreaScrollProgressValue] =
   createAtomHooks(atom(0))
+
+const [, useSubscriptionSearchState, , , getSubscriptionSearchState, setSubscriptionSearchState] =
+  createAtomHooks(atom<SubscriptionSearchState>({ isOpen: false, query: "" }))
+
+export { useSubscriptionSearchState }
+
+export const openSubscriptionSearchPanel = () => {
+  setSubscriptionSearchState(openSubscriptionSearch(getSubscriptionSearchState()))
+}
+
+export const closeSubscriptionSearchPanel = () => {
+  setSubscriptionSearchState(closeSubscriptionSearch(getSubscriptionSearchState()))
+}

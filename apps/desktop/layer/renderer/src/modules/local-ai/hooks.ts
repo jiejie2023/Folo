@@ -118,7 +118,7 @@ export type DesktopLocalAICompleteTextInput = {
   feature: LocalAIFeature
   maxTokens?: number
   messages: Array<{
-    content: string
+    content: DesktopLocalAIMessageContent
     name?: string
     role: "assistant" | "system" | "tool" | "user"
     toolCallId?: string
@@ -129,6 +129,23 @@ export type DesktopLocalAICompleteTextInput = {
   responseFormat?: "json_object"
   temperature?: number
 }
+
+export type DesktopLocalAITextPart = {
+  text: string
+  type: "text"
+}
+
+export type DesktopLocalAIImagePart = {
+  image_url: {
+    detail?: "auto" | "high" | "low"
+    url: string
+  }
+  type: "image_url"
+}
+
+export type DesktopLocalAIMessageContent =
+  | string
+  | Array<DesktopLocalAIImagePart | DesktopLocalAITextPart>
 
 export type DesktopLocalAIIPC = {
   callMCPTool: (

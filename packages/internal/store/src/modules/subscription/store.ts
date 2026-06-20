@@ -556,37 +556,16 @@ class SubscriptionSyncService {
     }
     const tx = createTransaction(current)
 
-    let addNewCategory = false
     tx.store(() => {
       immerSet((draft) => {
-        if (
-          nextSubscription.category &&
-          !draft.categories[nextSubscription.view]!.has(nextSubscription.category)
-        ) {
-          addNewCategory = true
-          draft.categories[nextSubscription.view]!.add(nextSubscription.category)
-        }
-
-        if (nextSubscription.type === "feed") {
-          draft.feedIdByView[current.view]!.delete(current.feedId!)
-          draft.feedIdByView[nextSubscription.view]!.add(nextSubscription.feedId!)
-        }
-
         draft.data[subscriptionId] = nextSubscription
+        rebuildSubscriptionIndexes(draft)
       })
     })
     tx.rollback((current) => {
       immerSet((draft) => {
-        if (addNewCategory && nextSubscription.category) {
-          draft.categories[nextSubscription.view]!.delete(nextSubscription.category)
-        }
-
-        if (nextSubscription.type === "feed") {
-          draft.feedIdByView[nextSubscription.view]!.delete(nextSubscription.feedId!)
-          draft.feedIdByView[current.view]!.add(current.feedId!)
-        }
-
         draft.data[subscriptionId] = current
+        rebuildSubscriptionIndexes(draft)
       })
     })
     tx.request(async () => {
@@ -771,22 +750,10 @@ class SubscriptionSyncService {
         for (const id of normalizedIds) {
           const subscription = draft.data[id]
           if (!subscription) continue
-          draft.subscriptionIdSet.delete(getSubscriptionDBId(subscription))
-          if (subscription.feedId) {
-            draft.feedIdByView[subscription.view]!.delete(subscription.feedId)
-            draft.feedIdByView[FeedViewType.All]!.delete(subscription.feedId)
-            draft.syncedFeedIds.delete(subscription.feedId)
-          }
-          if (subscription.listId) {
-            draft.listIdByView[subscription.view]!.delete(subscription.listId)
-            draft.listIdByView[FeedViewType.All]!.delete(subscription.listId)
-          }
-          if (subscription.category) {
-            draft.categories[subscription.view]!.delete(subscription.category)
-            draft.categories[FeedViewType.All]!.delete(subscription.category)
-          }
+          if (subscription.feedId) draft.syncedFeedIds.delete(subscription.feedId)
           delete draft.data[id]
         }
+        rebuildSubscriptionIndexes(draft)
       })
     })
 
@@ -824,6 +791,7 @@ class SubscriptionSyncService {
             draft.categories[FeedViewType.All]!.add(subscription.category)
           }
         }
+        rebuildSubscriptionIndexes(draft)
       })
     })
 
@@ -852,6 +820,7 @@ class SubscriptionSyncService {
     category?: string | null
     view: FeedViewType
   }) {
+    const hasCategoryUpdate = newCategory !== undefined
     const cloudMutationFeedIds = getAccountMutableFeedIds(feedIds)
     const current = feedIds
       .map((id) => get().data[id])
@@ -871,16 +840,13 @@ class SubscriptionSyncService {
           const subscription = draft.data[feedId]
           if (!subscription) continue
 
-          const currentView = subscription.view
-          draft.feedIdByView[currentView]!.delete(feedId)
-          draft.feedIdByView[newView]!.add(feedId)
           subscription.view = newView
 
-          if (newCategory) {
-            draft.categories[newView]!.add(newCategory)
-            subscription.category = newCategory
+          if (hasCategoryUpdate) {
+            subscription.category = newCategory ?? null
           }
         }
+        rebuildSubscriptionIndexes(draft)
       })
     })
 
@@ -902,24 +868,25 @@ class SubscriptionSyncService {
           if (!current[index]) continue
 
           subscription.view = current[index].view
-          draft.feedIdByView[newView]!.delete(feedId)
-          draft.feedIdByView[current[index]!.view]!.add(feedId)
-
-          if (newCategory) {
-            const currentCategory = current[index].category
-            subscription.category = currentCategory
-          }
+          subscription.category = current[index].category
         }
+        rebuildSubscriptionIndexes(draft)
       })
     })
 
     tx.persist(() => {
+      const data = hasCategoryUpdate
+        ? {
+            view: newView,
+            category: newCategory ?? null,
+          }
+        : {
+            view: newView,
+          }
+
       return SubscriptionService.patchMany({
         feedIds,
-        data: {
-          view: newView,
-          category: newCategory,
-        },
+        data,
       })
     })
 

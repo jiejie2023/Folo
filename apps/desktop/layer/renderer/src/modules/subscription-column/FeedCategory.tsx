@@ -47,12 +47,15 @@ interface FeedCategoryProps {
   data: FeedId[]
   view: FeedViewType
   categoryOpenStateData: Record<string, boolean>
+  forceOpen?: boolean
+  disableAutoHideUnread?: boolean
 }
 
 function FeedCategoryImpl({
   data: ids,
   view: viewOnRoute,
   categoryOpenStateData,
+  forceOpen,
 }: FeedCategoryProps) {
   const { t } = useTranslation()
 
@@ -76,6 +79,7 @@ function FeedCategoryImpl({
       isCategory,
     })
   }, [categoryOpenStateData, folderName, isCategory])
+  const shouldRenderOpen = forceOpen || open
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -317,7 +321,7 @@ function FeedCategoryImpl({
               data-type="collapse"
               type="button"
               onClick={handleCollapseButtonClick}
-              data-state={open ? "open" : "close"}
+              data-state={shouldRenderOpen ? "open" : "close"}
               className={cn(
                 "flex h-8 items-center [&_.i-mgc-right-cute-fi]:data-[state=open]:rotate-90",
               )}
@@ -356,7 +360,7 @@ function FeedCategoryImpl({
         </div>
       )}
       <AnimatePresence initial={false}>
-        {open && (
+        {shouldRenderOpen && (
           <m.div
             ref={itemsRef}
             className="space-y-px"
@@ -397,7 +401,7 @@ export const FeedCategoryAutoHideUnread = memo(function FeedCategoryAutoHideUnre
   props: FeedCategoryProps,
 ) {
   const hideAllReadSubscriptions = useHideAllReadSubscriptions()
-  if (hideAllReadSubscriptions) {
+  if (hideAllReadSubscriptions && !props.disableAutoHideUnread) {
     return <FilterReadFeedCategory {...props} />
   }
   return <FeedCategoryImpl {...props} />

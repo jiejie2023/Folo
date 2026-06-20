@@ -2,8 +2,23 @@ export type LocalAIProviderType = "openai-compatible"
 
 export type LocalAIChatRole = "assistant" | "system" | "tool" | "user"
 
+export type LocalAITextPart = {
+  text: string
+  type: "text"
+}
+
+export type LocalAIImagePart = {
+  image_url: {
+    detail?: "auto" | "high" | "low"
+    url: string
+  }
+  type: "image_url"
+}
+
+export type LocalAIMessageContent = string | Array<LocalAIImagePart | LocalAITextPart>
+
 export type LocalAIChatMessage = {
-  content: string
+  content: LocalAIMessageContent
   name?: string
   role: LocalAIChatRole
   toolCallId?: string

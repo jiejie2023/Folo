@@ -244,6 +244,55 @@ describe("createLocalAIChatTransport", () => {
     expect(messages[0]!.content).toContain("Readable article body")
   })
 
+  it("sends uploaded image attachments as multimodal local chat content", async () => {
+    const ipc = createIPC()
+    mocks.getLocalAIIPC.mockReturnValue(ipc)
+    const transport = createTransport()
+
+    await transport.sendMessages({
+      abortSignal: undefined,
+      chatId: "chat-1",
+      messageId: undefined,
+      messages: [
+        createMessage([
+          { type: "text", text: "这张图片？" },
+          {
+            type: "data-block",
+            data: [
+              {
+                attachment: {
+                  id: "image-1",
+                  name: "image.png",
+                  serverUrl: "https://cdn.example.com/image.png",
+                  size: 1234,
+                  type: "image/png",
+                },
+                id: "image-1",
+                type: "fileAttachment",
+              },
+            ],
+          },
+        ]),
+      ],
+      trigger: "submit-message",
+    })
+
+    const [{ messages }] = vi.mocked(ipc.startChatStream).mock.calls[0]!
+    expect(messages[1]).toEqual({
+      content: [
+        { text: "这张图片？", type: "text" },
+        {
+          image_url: {
+            detail: "auto",
+            url: "https://cdn.example.com/image.png",
+          },
+          type: "image_url",
+        },
+      ],
+      role: "user",
+    })
+  })
+
   it("adds current timeline entries to local timeline summary prompts", async () => {
     mocks.getAISettings.mockReturnValue({
       localAI: {

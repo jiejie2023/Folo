@@ -151,7 +151,6 @@ export const useFeedActions = ({
       }),
       new MenuItemText({
         label: t("subscription_source.sync_to_account"),
-        icon: <i className="i-mgc-cloud-cute-re" />,
         disabled: syncLocalSubscriptionToAccount.isPending,
         hide:
           isMultipleSelection || !subscription || !isLocalSubscription(subscription) || isSynced,

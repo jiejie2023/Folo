@@ -528,6 +528,41 @@ describe("subscription source-aware reset", () => {
     expect(apiCategoryUpdateMock).not.toHaveBeenCalled()
   })
 
+  test("edit removes an empty old category from the local category index", async () => {
+    await subscriptionActions.upsertManyInSession([localSub("local-feed")])
+
+    await subscriptionSyncService.edit({
+      ...localSub("local-feed"),
+      category: "Renamed Local",
+    })
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["local-feed"]?.category).toBe("Renamed Local")
+    expect(state.categories[FeedViewType.Articles]?.has("Renamed Local")).toBe(true)
+    expect(state.categories[FeedViewType.Articles]?.has("Local")).toBe(false)
+  })
+
+  test("batchUpdateSubscription can clear a local category in memory and storage", async () => {
+    await subscriptionActions.upsertManyInSession([localSub("local-feed")])
+
+    await subscriptionSyncService.batchUpdateSubscription({
+      feedIds: ["local-feed"],
+      category: null,
+      view: FeedViewType.Articles,
+    })
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["local-feed"]?.category).toBeNull()
+    expect(state.categories[FeedViewType.Articles]?.has("Local")).toBe(false)
+    expect(subscriptionPatchManyMock).toHaveBeenCalledWith({
+      feedIds: ["local-feed"],
+      data: {
+        view: FeedViewType.Articles,
+        category: null,
+      },
+    })
+  })
+
   test("deleteCategory syncs only account-managed feeds when signed in", async () => {
     const user = {
       id: "cloud-user",

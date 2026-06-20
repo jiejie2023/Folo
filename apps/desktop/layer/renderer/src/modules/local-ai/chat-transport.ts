@@ -11,8 +11,11 @@ import { getAIOutputLanguageLabel } from "~/modules/ai-chat/utils/output-languag
 
 import type {
   DesktopLocalAICompleteTextInput,
+  DesktopLocalAIImagePart,
   DesktopLocalAIIPC,
+  DesktopLocalAIMessageContent,
   DesktopLocalAIProfile,
+  DesktopLocalAITextPart,
 } from "./hooks"
 import {
   assertLocalAIProfileEnabled,
@@ -62,6 +65,7 @@ const MAX_DESCRIPTION_LENGTH = 1000
 const MAX_TIMELINE_CONTEXT_ENTRIES = 20
 const MAX_TIMELINE_ENTRY_CONTENT_LENGTH = 1200
 const DEFAULT_SYSTEM_PROMPT = "You are Folo AI, an RSS reading assistant."
+const IMAGE_MIME_TYPE_PREFIX = "image/"
 
 export const createLocalAIChatTransport = (
   options: LocalAIChatTransportOptions,
@@ -228,24 +232,24 @@ const buildLocalChatMessages = (
 ): DesktopLocalAICompleteTextInput["messages"] => {
   const entryContext = buildEntryContext(messages)
   const localMessages: DesktopLocalAICompleteTextInput["messages"] = []
-  let hasConversationText = false
+  let hasConversationContent = false
   localMessages.push({
     content: buildSystemPrompt(entryContext),
     role: "system",
   })
 
   for (const message of messages) {
-    const content = extractMessageText(message)
+    const content = extractMessageContent(message)
     if (!content) continue
 
     localMessages.push({
       content,
       role: message.role,
     })
-    hasConversationText = true
+    hasConversationContent = true
   }
 
-  if (!hasConversationText) {
+  if (!hasConversationContent) {
     localMessages.push({
       content: "Use the provided context to answer the user.",
       role: "user",
@@ -268,6 +272,23 @@ const buildSystemPrompt = (entryContext: string | null): string => {
     .join("\n\n")
 }
 
+const extractMessageContent = (message: BizUIMessage): DesktopLocalAIMessageContent | null => {
+  const text = extractMessageText(message)
+  const images = extractMessageImageParts(message)
+
+  if (images.length === 0) {
+    return text || null
+  }
+
+  const parts: Array<DesktopLocalAIImagePart | DesktopLocalAITextPart> = []
+  if (text) {
+    parts.push({ text, type: "text" })
+  }
+  parts.push(...images)
+
+  return parts
+}
+
 const extractMessageText = (message: BizUIMessage): string => {
   const segments: string[] = []
 
@@ -288,6 +309,33 @@ const extractMessageText = (message: BizUIMessage): string => {
     .map((segment) => segment.trim())
     .filter(Boolean)
     .join("\n")
+}
+
+const extractMessageImageParts = (message: BizUIMessage): DesktopLocalAIImagePart[] => {
+  const images: DesktopLocalAIImagePart[] = []
+
+  for (const part of message.parts) {
+    if (part.type !== "data-block") continue
+
+    for (const block of part.data) {
+      if (block.type !== "fileAttachment") continue
+      const { attachment } = block
+      if (!attachment.type.startsWith(IMAGE_MIME_TYPE_PREFIX)) continue
+
+      const url = attachment.serverUrl || attachment.dataUrl
+      if (!url) continue
+
+      images.push({
+        image_url: {
+          detail: "auto",
+          url,
+        },
+        type: "image_url",
+      })
+    }
+  }
+
+  return images
 }
 
 const buildEntryContext = (messages: BizUIMessage[]): string | null => {

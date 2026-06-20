@@ -5,7 +5,7 @@ type FetchFn = (input: string, init?: RequestInit) => Promise<Response>
 type OpenAICompatibleResponseFormat = "json_object"
 
 type OpenAICompatibleChatRequestMessage = {
-  content: string | null
+  content: LocalAIChatMessage["content"] | null
   name?: string
   role: LocalAIChatMessage["role"]
   tool_call_id?: string
