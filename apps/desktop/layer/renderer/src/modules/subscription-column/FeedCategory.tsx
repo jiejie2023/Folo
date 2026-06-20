@@ -36,7 +36,7 @@ import { useModalStack } from "../../components/ui/modal/stacked/hooks"
 import { ListCreationModalContent } from "../settings/tabs/lists/modals"
 import { CategoryRemoveDialogContent } from "./CategoryRemoveDialogContent"
 import { CategoryUnsubscribeDialogContent } from "./CategoryUnsubscribeDialogContent"
-import { getFeedCategoryOpenState } from "./FeedCategory.utils"
+import { getFeedCategoryNavigationOptions, getFeedCategoryOpenState } from "./FeedCategory.utils"
 import { RenameCategoryForm } from "./RenameCategoryForm"
 import { SortedFeedItems } from "./SortedFeedItems"
 import { feedColumnStyles } from "./styles"
@@ -93,6 +93,7 @@ function FeedCategoryImpl({
   const shouldOpen = useRouteParamsSelector(
     (s) => typeof s.feedId === "string" && ids.includes(s.feedId),
   )
+  const currentTimelineId = useRouteParamsSelector((s) => s.timelineId)
 
   const scroller = useScrollViewElement()
   const scrollerRef = useRefValue(scroller)
@@ -143,11 +144,13 @@ function FeedCategoryImpl({
 
   const setCategoryActive = () => {
     if (view !== undefined) {
-      navigate({
-        entryId: null,
-        folderName,
-        view: viewOnRoute,
-      })
+      navigate(
+        getFeedCategoryNavigationOptions({
+          folderName,
+          timelineId: currentTimelineId,
+          view: viewOnRoute,
+        }),
+      )
     }
   }
 

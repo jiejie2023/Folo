@@ -12,7 +12,12 @@ import {
 import { entryActions, entrySyncServices, useEntryStore } from "@follow/store/entry/store"
 import type { UseEntriesReturn } from "@follow/store/entry/types"
 import { fallbackReturn } from "@follow/store/entry/utils"
-import { useFolderFeedsByFeedId, useSyncedFeedIds } from "@follow/store/subscription/hooks"
+import { getSubscribedFeedIdAndInboxHandlesByView } from "@follow/store/subscription/getter"
+import {
+  useFolderFeedsByFeedId,
+  useSubscriptionIdsByView,
+  useSyncedFeedIds,
+} from "@follow/store/subscription/hooks"
 import { unreadSyncService } from "@follow/store/unread/store"
 import { nextFrame } from "@follow/utils"
 import { isBizId } from "@follow/utils/utils"
@@ -31,10 +36,25 @@ import { useLocalAIProfileId } from "~/modules/local-ai/hooks"
 import { aiTimelineEnabledAtom } from "../atoms/ai-timeline"
 import { getVisibleLocalEntryIds } from "./filter-local-entry-ids"
 import { canUseTimelineAI } from "./timeline-ai-availability"
+import { getTimelineFolderFeedIds, mergeEntryIds, shouldUseViewFeedIds } from "./timeline-source"
 import { useIsPreviewFeed } from "./useIsPreviewFeed"
 
+const useTimelineViewSourceIds = (view: FeedViewType, excludePrivate: boolean) => {
+  const sourceIds = useSubscriptionIdsByView(view)
+
+  return useMemo(() => {
+    const visibleSourceIds = getSubscribedFeedIdAndInboxHandlesByView({
+      view,
+      excludePrivate,
+      excludeHidden: true,
+    })
+    const visibleSourceIdSet = new Set(visibleSourceIds)
+    return sourceIds.filter((sourceId) => visibleSourceIdSet.has(sourceId))
+  }, [excludePrivate, sourceIds, view])
+}
+
 const useRemoteEntries = (): UseEntriesReturn => {
-  const { feedId, view, inboxId, listId, isSyncedTimeline } = useRouteParams()
+  const { feedId, view, inboxId, listId, isCollection, isSyncedTimeline } = useRouteParams()
   const isPreview = useIsPreviewFeed()
 
   const unreadOnly = useGeneralSettingKey("unreadOnly")
@@ -54,15 +74,44 @@ const useRemoteEntries = (): UseEntriesReturn => {
     feedId,
     view,
   })
-  const syncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const viewSourceIds = useTimelineViewSourceIds(view, hidePrivateSubscriptionsInTimeline === true)
+  const shouldUseCurrentViewFeedIds = shouldUseViewFeedIds({
+    feedId,
+    folderIds,
+    inboxId,
+    isCollection,
+    isSyncedTimeline,
+    listId,
+    view,
+  })
+  const allSyncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const syncedFeedIds = useMemo(
+    () =>
+      getTimelineFolderFeedIds({
+        allowedFeedIds: viewSourceIds,
+        folderIds: allSyncedFeedIds,
+      }),
+    [allSyncedFeedIds, viewSourceIds],
+  )
+  const timelineFolderIds = useMemo(
+    () =>
+      getTimelineFolderFeedIds({
+        allowedFeedIds: isSyncedTimeline ? syncedFeedIds : viewSourceIds,
+        folderIds,
+      }),
+    [folderIds, isSyncedTimeline, syncedFeedIds, viewSourceIds],
+  )
   const shouldFilterSynced =
     isSyncedTimeline && (!feedId || feedId === ROUTE_FEED_PENDING) && !inboxId && !listId
+  const shouldFilterFolder = folderIds.length > 0
 
   const entriesOptions = useMemo(() => {
     if (shouldFilterSynced && syncedFeedIds.length === 0) return
+    if (shouldFilterFolder && timelineFolderIds.length === 0) return
+    if (shouldUseCurrentViewFeedIds && viewSourceIds.length === 0) return
 
     const params = {
-      feedId: folderIds?.join(",") || feedId,
+      feedId: shouldUseCurrentViewFeedIds || shouldFilterFolder ? undefined : feedId,
       inboxId,
       listId,
       view,
@@ -73,7 +122,9 @@ const useRemoteEntries = (): UseEntriesReturn => {
       ...(view === FeedViewType.All && { limit: 40 }),
       ...(aiTimelineEnabled && canUseAiTimeline && { aiSort: true }),
       ...(aiTimelineEnabled && canUseAiTimeline && { aiTimelinePrompt }),
+      ...(shouldUseCurrentViewFeedIds && { feedIdList: viewSourceIds }),
       ...(shouldFilterSynced && { feedIdList: syncedFeedIds }),
+      ...(shouldFilterFolder && { feedIdList: timelineFolderIds }),
     }
 
     if (feedId && listId && isBizId(feedId)) {
@@ -83,7 +134,6 @@ const useRemoteEntries = (): UseEntriesReturn => {
     return params
   }, [
     feedId,
-    folderIds,
     inboxId,
     listId,
     unreadOnly,
@@ -94,7 +144,11 @@ const useRemoteEntries = (): UseEntriesReturn => {
     canUseAiTimeline,
     aiTimelinePrompt,
     shouldFilterSynced,
+    shouldFilterFolder,
+    shouldUseCurrentViewFeedIds,
     syncedFeedIds,
+    timelineFolderIds,
+    viewSourceIds,
   ])
   const query = useEntriesQuery(entriesOptions)
 
@@ -144,12 +198,39 @@ const useLocalEntries = (): UseEntriesReturn => {
     feedId,
     view,
   })
+  const viewSourceIds = useTimelineViewSourceIds(view, hidePrivateSubscriptionsInTimeline === true)
+  const shouldUseCurrentViewFeedIds = shouldUseViewFeedIds({
+    feedId,
+    folderIds,
+    inboxId,
+    isCollection,
+    isSyncedTimeline,
+    listId,
+    view,
+  })
   const entryIdsByView = useEntryIdsByView(view, hidePrivateSubscriptionsInTimeline)
-  const syncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const entryIdsByViewFeedIds = useEntryIdsByFeedIds(viewSourceIds)
+  const allSyncedFeedIds = useSyncedFeedIds(FeedViewType.All)
+  const syncedFeedIds = useMemo(
+    () =>
+      getTimelineFolderFeedIds({
+        allowedFeedIds: viewSourceIds,
+        folderIds: allSyncedFeedIds,
+      }),
+    [allSyncedFeedIds, viewSourceIds],
+  )
+  const timelineFolderIds = useMemo(
+    () =>
+      getTimelineFolderFeedIds({
+        allowedFeedIds: isSyncedTimeline ? syncedFeedIds : viewSourceIds,
+        folderIds,
+      }),
+    [folderIds, isSyncedTimeline, syncedFeedIds, viewSourceIds],
+  )
   const entryIdsBySyncedFeeds = useEntryIdsByFeedIds(syncedFeedIds)
   const entryIdsByCollections = useCollectionEntryList(view)
   const entryIdsByFeedId = useEntryIdsByFeedId(feedId)
-  const entryIdsByCategory = useEntryIdsByFeedIds(folderIds)
+  const entryIdsByCategory = useEntryIdsByFeedIds(timelineFolderIds)
   const entryIdsByListId = useEntryIdsByListId(listId)
   const entryIdsByInboxId = useEntryIdsByInboxId(inboxId)
 
@@ -188,7 +269,9 @@ const useLocalEntries = (): UseEntriesReturn => {
           : showEntriesByView
             ? isSyncedTimeline
               ? (entryIdsBySyncedFeeds ?? [])
-              : (entryIdsByView ?? [])
+              : shouldUseCurrentViewFeedIds
+                ? mergeEntryIds(entryIdsByViewFeedIds, entryIdsByView)
+                : (entryIdsByView ?? [])
             : (getEntryIdsFromMultiplePlace(
                 entryIdsByFeedId,
                 entryIdsByCategory,
@@ -215,10 +298,12 @@ const useLocalEntries = (): UseEntriesReturn => {
         entryIdsByInboxId,
         entryIdsByListId,
         entryIdsByView,
+        entryIdsByViewFeedIds,
         entryIdsBySyncedFeeds,
         isCollection,
         isSyncedTimeline,
         localQueryKey,
+        shouldUseCurrentViewFeedIds,
         showEntriesByView,
         unreadOnly,
       ],
