@@ -29,6 +29,7 @@
   },
   "scripts": {
     "generate": "drizzle-kit generate",
+    "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

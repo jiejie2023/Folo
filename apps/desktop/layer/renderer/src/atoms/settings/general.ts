@@ -7,6 +7,8 @@ import type { SupportedLanguages } from "@follow-app/client-sdk"
 import { jotaiStore } from "~/lib/jotai"
 import { getDefaultLanguage } from "~/lib/language"
 
+import { getCanLocalAIUnlockGeneralSetting } from "./local-ai-paid-access"
+
 export const DEFAULT_ACTION_LANGUAGE = "default"
 
 export const createDefaultGeneralSettings = (): GeneralSettings => ({
@@ -25,7 +27,9 @@ const {
   useSettingValue: useGeneralSettingValueInternal,
 
   settingAtom: __generalSettingAtom,
-} = createSettingAtom("general", createDefaultGeneralSettings)
+} = createSettingAtom("general", createDefaultGeneralSettings, {
+  canAccessPaidSetting: ({ key }) => getCanLocalAIUnlockGeneralSetting(key),
+})
 export const hookEnhancedSettings = <
   T1 extends (key: any) => any,
   T2 extends (selector: (s: any) => any) => any,

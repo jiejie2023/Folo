@@ -12,6 +12,7 @@ import { SettingItemGroup, SettingSectionTitle } from "../section"
 export { SettingPaidLevels } from "@follow/shared/settings/constants"
 
 type SharedSettingItem = {
+  bypassPaidRoleLock?: boolean
   disabled?: boolean
 }
 
@@ -98,6 +99,7 @@ export const createSettingBuilder =
         return null
       }
       const disabledForRole =
+        !assertSetting.bypassPaidRoleLock &&
         role === UserRole.Free &&
         "paidLevel" in assertSetting &&
         assertSetting.paidLevel !== undefined &&

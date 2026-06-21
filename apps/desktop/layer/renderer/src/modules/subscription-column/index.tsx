@@ -23,7 +23,7 @@ import { useIsInMASReview } from "~/atoms/server-configs"
 import { useUISettingKey } from "~/atoms/settings/ui"
 import { setTimelineColumnShow, useSubscriptionColumnShow } from "~/atoms/sidebar"
 import { Focusable } from "~/components/common/Focusable"
-import { HotkeyScope } from "~/constants"
+import { HotkeyScope, ROUTE_TIMELINE_SYNCED } from "~/constants"
 import { useBackHome } from "~/hooks/biz/useNavigateEntry"
 import { useReduceMotion } from "~/hooks/biz/useReduceMotion"
 import { parseView, useRouteParamsSelector } from "~/hooks/biz/useRouteParams"
@@ -33,9 +33,16 @@ import { useSettingModal } from "~/modules/settings/modal/useSettingModal"
 import { WindowUnderBlur } from "../../components/ui/background"
 import { COMMAND_ID } from "../command/commands/id"
 import { useCommandBinding } from "../command/hooks/use-command-binding"
-import { getSelectedFeedIds, resetSelectedFeedIds, setSelectedFeedIds } from "./atom"
+import {
+  getSelectedFeedIds,
+  resetSelectedFeedIds,
+  setSelectedFeedIds,
+  useSubscriptionSearchState,
+} from "./atom"
 import { useShouldFreeUpSpace } from "./hook"
 import { SubscriptionListGuard } from "./subscription-list/SubscriptionListGuard"
+import { resetSubscriptionSearchForScope } from "./subscription-search-state"
+import { insertSyncedTimeline } from "./subscription-timeline"
 import { SubscriptionColumnHeader } from "./SubscriptionColumnHeader"
 import { SubscriptionTabButton } from "./SubscriptionTabButton"
 
@@ -47,18 +54,36 @@ export function SubscriptionColumn({
 }: PropsWithChildren<{ className?: string }>) {
   const { isLoading: isSubscriptionLoading } = usePrefetchSubscription()
   usePrefetchUnread()
-
   const carouselRef = useRef<HTMLDivElement>(null)
-  const timelineList = useTimelineList({
+  const [subscriptionSearchState, setSubscriptionSearchState] = useSubscriptionSearchState()
+  const { isOpen: isSearchOpen, query: feedSearchQuery } = subscriptionSearchState
+  const visibleTimelineList = useTimelineList({
     withAll: true,
     visible: true,
   })
+  const timelineList = useMemo(
+    () => insertSyncedTimeline(visibleTimelineList),
+    [visibleTimelineList],
+  )
 
   const routeParams = useRouteParamsSelector((s) => ({
     timelineId: s.timelineId,
     view: s.view,
     listId: s.listId,
   }))
+  const searchScopeRef = useRef<string | undefined>(undefined)
+
+  useLayoutEffect(() => {
+    const nextScope = `${routeParams.timelineId ?? ""}:${routeParams.view}`
+    const previousScope = searchScopeRef.current
+    searchScopeRef.current = nextScope
+
+    if (!previousScope) return
+
+    setSubscriptionSearchState((state) =>
+      resetSubscriptionSearchForScope({ previousScope, nextScope, state }),
+    )
+  }, [routeParams.timelineId, routeParams.view, setSubscriptionSearchState])
 
   const [timelineId, setMemoizedTimelineId] = useState(routeParams.timelineId ?? timelineList[0])
 
@@ -114,7 +139,6 @@ export function SubscriptionColumn({
     if (!focusableContainerRef.current) return
     focusableContainerRef.current.focus()
   }, [])
-
   return (
     <WindowUnderBlur
       as={Focusable}
@@ -169,8 +193,13 @@ export function SubscriptionColumn({
             <section key={timelineId} className="h-full w-feed-col shrink-0 snap-center">
               <SubscriptionListGuard
                 key={timelineId}
-                view={parseView(timelineId) ?? FeedViewType.Articles}
+                view={
+                  timelineId === ROUTE_TIMELINE_SYNCED
+                    ? FeedViewType.All
+                    : (parseView(timelineId) ?? FeedViewType.Articles)
+                }
                 isSubscriptionLoading={isSubscriptionLoading}
+                feedSearchQuery={isSearchOpen ? feedSearchQuery : ""}
               />
             </section>
           ))}
@@ -185,7 +214,11 @@ export function SubscriptionColumn({
 const SwipeWrapper: FC<{ active: string; children: React.JSX.Element[] }> = memo(
   ({ children, active }) => {
     const reduceMotion = useReduceMotion()
-    const timelineList = useTimelineList({ withAll: true, visible: true })
+    const visibleTimelineList = useTimelineList({ withAll: true, visible: true })
+    const timelineList = useMemo(
+      () => insertSyncedTimeline(visibleTimelineList),
+      [visibleTimelineList],
+    )
     const viewIndex = timelineList.indexOf(active)
 
     const feedColumnWidth = useUISettingKey("feedColWidth")
@@ -238,7 +271,11 @@ const SwipeWrapper: FC<{ active: string; children: React.JSX.Element[] }> = memo
 )
 
 const TabsRow: FC = () => {
-  const timelineList = useTimelineList({ withAll: true, visible: true })
+  const visibleTimelineList = useTimelineList({ withAll: true, visible: true })
+  const timelineList = useMemo(
+    () => insertSyncedTimeline(visibleTimelineList),
+    [visibleTimelineList],
+  )
 
   return (
     <div className="flex h-11 items-center px-1 text-xl text-text-secondary">

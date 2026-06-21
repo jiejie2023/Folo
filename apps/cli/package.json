@@ -28,7 +28,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "build": "tsup --config tsup.config.ts && chmod +x dist/index.js",
+    "build": "tsup --config tsup.config.ts && node scripts/make-executable.mjs",
     "dev": "tsx src/index.ts",
     "start": "node dist/index.js",
     "test": "pnpm run build && vitest run",

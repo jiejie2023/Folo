@@ -16,6 +16,7 @@ export const SortByAlphabeticalFeedList = ({
   view,
   data,
   categoryOpenStateData,
+  forceOpenCategories,
 }: FeedListProps) => {
   const feedId2CategoryMap = useSubscriptionStore(
     useCallback(
@@ -119,6 +120,8 @@ export const SortByAlphabeticalFeedList = ({
           data={data[category]!}
           view={view}
           categoryOpenStateData={categoryOpenStateData}
+          forceOpen={forceOpenCategories}
+          disableAutoHideUnread={forceOpenCategories}
         />
       ))}
     </Fragment>

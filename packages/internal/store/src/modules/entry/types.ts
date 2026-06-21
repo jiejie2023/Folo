@@ -14,6 +14,7 @@ export type FetchEntriesProps = {
   isCollection?: boolean
   excludePrivate?: boolean
   aiSort?: boolean
+  aiTimelinePrompt?: string
 }
 
 export type FetchEntriesPropsSettings = {

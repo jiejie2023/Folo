@@ -1,11 +1,12 @@
 import { Label } from "@follow/components/ui/label/index.js"
+import { IN_ELECTRON } from "@follow/shared/constants"
 import { useTranslation } from "react-i18next"
 
 import { setAISetting, useAISettingValue } from "~/atoms/settings/ai"
 
 import { createDefineSettingItem } from "../helper/builder"
 import { createSettingBuilder } from "../helper/setting-builder"
-import { ByokSection } from "./ai/byok"
+import { APIManagementSection, FeatureRoutingSection, LocalUsageSection } from "./ai/api-management"
 import { MCPServicesSection } from "./ai/mcp/MCPServicesSection"
 import { PanelStyleSection } from "./ai/PanelStyleSection"
 import { PersonalizePromptSection } from "./ai/PersonalizePromptSection"
@@ -26,7 +27,7 @@ export const SettingAI = () => {
   const { t } = useTranslation("ai")
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 min-w-0 max-w-full">
       <SettingBuilder
         settings={[
           {
@@ -71,11 +72,17 @@ export const SettingAI = () => {
           },
           MCPServicesSection,
 
-          {
-            type: "title",
-            value: t("byok.title"),
-          },
-          ByokSection,
+          ...(IN_ELECTRON
+            ? [
+                {
+                  type: "title" as const,
+                  value: t("api_management.title"),
+                },
+                APIManagementSection,
+                FeatureRoutingSection,
+                LocalUsageSection,
+              ]
+            : []),
 
           {
             type: "title",

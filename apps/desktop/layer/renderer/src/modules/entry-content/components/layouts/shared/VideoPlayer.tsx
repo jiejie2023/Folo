@@ -9,6 +9,7 @@ import { useHover } from "@use-gesture/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import { AudioPlayer } from "~/atoms/player"
+import { useGeneralSettingKey } from "~/atoms/settings/general"
 import { useSpotlightSettingKey } from "~/atoms/settings/spotlight"
 import { m } from "~/components/common/Motion"
 import { HTML } from "~/components/ui/markdown/HTML"
@@ -19,6 +20,8 @@ import { PlainModal } from "~/components/ui/modal/stacked/custom-modal"
 import { useModalStack } from "~/components/ui/modal/stacked/hooks"
 import { useRenderStyle } from "~/hooks/biz/useRenderStyle"
 import { getDefaultLanguage } from "~/lib/language"
+
+import { useStableTranslatedContent } from "./use-stable-translated-content"
 
 const ViewTag = IN_ELECTRON ? "webview" : "iframe"
 
@@ -185,7 +188,13 @@ const PreviewVideoModalContent: ModalContentComponent<{
 }> = ({ dismiss, src, entryId, translation }) => {
   const entry = useEntry(entryId, (state) => ({ content: state.content }))
 
-  const content = translation?.content || entry?.content
+  const translationMode = useGeneralSettingKey("translationMode")
+  const content = useStableTranslatedContent({
+    format: "html",
+    mode: translationMode,
+    source: entry?.content,
+    target: translation?.content,
+  })
   const currentAudioPlayerIsPlay = useRef(AudioPlayer.get().status === "playing")
   const spotlightRules = useSpotlightSettingKey("spotlights")
 

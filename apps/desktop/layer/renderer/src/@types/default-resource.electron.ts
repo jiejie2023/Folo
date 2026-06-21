@@ -2,6 +2,8 @@
 import ai_en from "@locales/ai/en.json"
 import ai_frFR from "@locales/ai/fr-FR.json"
 import ai_ja from "@locales/ai/ja.json"
+import ai_zhCN from "@locales/ai/zh-CN.json"
+import ai_zhTW from "@locales/ai/zh-TW.json"
 import en from "@locales/app/en.json"
 import app_frFR from "@locales/app/fr-FR.json"
 import app_ja from "@locales/app/ja.json"
@@ -56,7 +58,7 @@ export const defaultResources = {
     settings: settings_zhCN,
     shortcuts: shortcuts_zhCN,
     errors: errors_zhCN,
-    ai: ai_en, // Fallback to English until Chinese translation is available
+    ai: ai_zhCN,
   },
 
   ja: {
@@ -75,7 +77,7 @@ export const defaultResources = {
     settings: settings_zhTW,
     shortcuts: shortcuts_zhTW,
     errors: errors_zhTW,
-    ai: ai_en, // Fallback to English until Traditional Chinese translation is available
+    ai: ai_zhTW,
   },
   "fr-FR": {
     app: app_frFR,

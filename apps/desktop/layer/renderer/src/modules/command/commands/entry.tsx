@@ -11,6 +11,7 @@ import { useMutation } from "@tanstack/react-query"
 import { useTranslation } from "react-i18next"
 import { toast } from "sonner"
 
+import { toggleShowAITranslationOnce } from "~/atoms/ai-translation"
 import { AudioPlayer, getAudioPlayerAtomValue } from "~/atoms/player"
 import { showPopover } from "~/atoms/popover"
 import {
@@ -251,6 +252,15 @@ export const useRegisterEntryCommands = () => {
             }
           }
           toggleShowSourceContent()
+        },
+      },
+      {
+        id: COMMAND_ID.entry.toggleAITranslation,
+        label: t("entry_actions.toggle_ai_translation"),
+        icon: <i className="i-mgc-translate-2-ai-cute-re" />,
+        category,
+        run: () => {
+          toggleShowAITranslationOnce()
         },
       },
       {

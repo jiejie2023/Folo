@@ -76,7 +76,23 @@ export class DockService extends IpcService {
 
   @IpcMethod()
   async updateUnreadCount(): Promise<void> {
-    const res = await apiClient.reads.getTotalCount()
+    let res: Awaited<ReturnType<typeof apiClient.reads.getTotalCount>>
+
+    try {
+      res = await apiClient.reads.getTotalCount()
+    } catch (error) {
+      const authError = error as { code?: string; status?: number; statusCode?: number }
+      if (
+        authError.code === "AUTH_REQUIRED" ||
+        authError.status === 401 ||
+        authError.statusCode === 401
+      ) {
+        setDockCount(0)
+        return
+      }
+
+      throw error
+    }
 
     setDockCount(res.data.count)
   }

@@ -3,13 +3,16 @@ import { useEntry } from "@follow/store/entry/hooks"
 import { useFeedById } from "@follow/store/feed/hooks"
 import type { FeedModel } from "@follow/store/feed/types"
 import { useIsInbox } from "@follow/store/inbox/hooks"
+import { useEntryTranslation } from "@follow/store/translation/hooks"
 import { thenable } from "@follow/utils"
 import { stopPropagation } from "@follow/utils/dom"
 import { clsx } from "@follow/utils/utils"
 import * as React from "react"
 import { memo } from "react"
 
+import { useShowAITranslation } from "~/atoms/ai-translation"
 import { useEntryIsInReadability } from "~/atoms/readability"
+import { useActionLanguage, useGeneralSettingKey } from "~/atoms/settings/general"
 import { useUISettingKey } from "~/atoms/settings/ui"
 import { ErrorBoundary } from "~/components/common/ErrorBoundary"
 import { ShadowDOM } from "~/components/common/ShadowDOM"
@@ -25,6 +28,7 @@ import { EntryRenderError } from "./components/entry-content/EntryRenderError"
 import type { EntryContentProps } from "./components/entry-content/types"
 import { EntryAttachments } from "./components/EntryAttachments"
 import { EntryTitle } from "./components/EntryTitle"
+import { useStableTranslatedContent } from "./components/layouts/shared/use-stable-translated-content"
 import { useEntryContent, useEntryMediaInfo } from "./hooks"
 
 const EntryContentImpl: Component<EntryContentProps> = ({
@@ -45,8 +49,28 @@ const EntryContentImpl: Component<EntryContentProps> = ({
 
   const isInbox = useIsInbox(entry?.inboxId)
   const isInReadabilityMode = useEntryIsInReadability(entryId)
+  const enableTranslation = useShowAITranslation()
+  const actionLanguage = useActionLanguage()
 
   const { error, content, isPending } = useEntryContent(entryId)
+  const entryTranslation = useEntryTranslation({
+    entryId,
+    language: actionLanguage,
+    enabled: enableTranslation,
+  })
+
+  const layoutTranslation = React.useMemo(
+    () =>
+      entryTranslation
+        ? {
+            content:
+              (isInReadabilityMode
+                ? entryTranslation.readabilityContent
+                : entryTranslation.content) ?? undefined,
+          }
+        : undefined,
+    [entryTranslation, isInReadabilityMode],
+  )
 
   const view = useRouteParamsSelector((route) => route.view)
 
@@ -68,6 +92,7 @@ const EntryContentImpl: Component<EntryContentProps> = ({
                   feedId={feed?.id || ""}
                   noMedia={noMedia}
                   content={content}
+                  translation={layoutTranslation}
                 />
               </ShadowDOM>
             </ErrorBoundary>
@@ -111,12 +136,22 @@ const Renderer: React.FC<{
   feedId: string
   noMedia?: boolean
   content?: Nullable<string>
-}> = React.memo(({ entryId, view, feedId, noMedia = false, content = "" }) => {
+  translation?: {
+    content?: string
+  }
+}> = React.memo(({ entryId, view, feedId, noMedia = false, content = "", translation }) => {
   const mediaInfo = useEntryMediaInfo(entryId)
 
+  const translationMode = useGeneralSettingKey("translationMode")
   const readerRenderInlineStyle = useUISettingKey("readerRenderInlineStyle")
 
   const stableRenderStyle = useRenderStyle()
+  const displayContent = useStableTranslatedContent({
+    format: "html",
+    mode: translationMode,
+    source: content,
+    target: translation?.content,
+  })
 
   return (
     <EntryContentHTMLRenderer
@@ -130,7 +165,7 @@ const Renderer: React.FC<{
       style={stableRenderStyle}
       renderInlineStyle={readerRenderInlineStyle}
     >
-      {content}
+      {displayContent}
     </EntryContentHTMLRenderer>
   )
 })

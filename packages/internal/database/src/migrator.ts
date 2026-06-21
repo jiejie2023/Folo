@@ -28,6 +28,10 @@ interface MigrationMeta {
 }
 
 type MaybePromise<T> = T | Promise<T>
+type SQLiteProxyMigrationDatabase = {
+  run: (query: SQL) => MaybePromise<unknown>
+  values: <TResult extends unknown[]>(query: SQL) => MaybePromise<TResult[]>
+}
 type SQLiteMigrationDatabase = Pick<SQLiteDatabase, "execSync" | "getAllSync">
 
 interface SQLiteColumnInfo {
@@ -78,10 +82,7 @@ async function readMigrationFiles({
 
 // https://github.com/drizzle-team/drizzle-orm/blob/main/drizzle-orm/src/sqlite-proxy/migrator.ts
 export async function migrate<_TSchema extends Record<string, unknown>>(
-  db: {
-    run: (query: SQL) => MaybePromise<unknown>
-    values: <TResult extends unknown[]>(query: SQL) => MaybePromise<TResult[]>
-  },
+  db: SQLiteProxyMigrationDatabase,
   config: MigrationConfig,
 ) {
   const migrations = await readMigrationFiles(config)
@@ -112,9 +113,58 @@ export async function migrate<_TSchema extends Record<string, unknown>>(
     }
   }
 
-  for (const query of queriesToRun) {
+  for (const rawQuery of queriesToRun) {
+    const query = rawQuery.trim()
+    if (!query) {
+      continue
+    }
+    if (await shouldSkipMigrationQueryForProxy(db, query)) {
+      continue
+    }
     await db.run(sql.raw(query))
   }
+}
+
+async function getTableColumnsForProxy(
+  db: SQLiteProxyMigrationDatabase,
+  tableName: string,
+): Promise<Set<string>> {
+  const escapedTableName = tableName.replaceAll("`", "``")
+  const columns = await db.values<unknown[]>(sql.raw(`PRAGMA table_info(\`${escapedTableName}\`)`))
+  return new Set(
+    columns
+      .map((column) => column[1])
+      .filter((columnName): columnName is string => typeof columnName === "string"),
+  )
+}
+
+async function shouldSkipMigrationQueryForProxy(
+  db: SQLiteProxyMigrationDatabase,
+  query: string,
+): Promise<boolean> {
+  const addColumnMatch = query.match(ADD_COLUMN_RE)
+  if (addColumnMatch) {
+    const tableName = addColumnMatch[1]
+    const columnName = addColumnMatch[2]
+    if (!tableName || !columnName) {
+      return false
+    }
+    const columns = await getTableColumnsForProxy(db, tableName)
+    return columns.has(columnName)
+  }
+
+  const dropColumnMatch = query.match(DROP_COLUMN_RE)
+  if (dropColumnMatch) {
+    const tableName = dropColumnMatch[1]
+    const columnName = dropColumnMatch[2]
+    if (!tableName || !columnName) {
+      return false
+    }
+    const columns = await getTableColumnsForProxy(db, tableName)
+    return !columns.has(columnName)
+  }
+
+  return false
 }
 
 function getTableColumns(db: SQLiteMigrationDatabase, tableName: string): Set<string> {

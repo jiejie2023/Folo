@@ -3,6 +3,7 @@ import { DEFAULT_SUMMARIZE_TIMELINE_SHORTCUT_ID } from "@follow/shared/settings/
 import type { AIShortcut } from "@follow/shared/settings/interface"
 import { useTranslation } from "react-i18next"
 
+import { getAIShortcutDisplayName } from "~/modules/ai-chat/utils/shortcut-display"
 import type { ActionButton } from "~/modules/ai-task/components/ai-item-actions"
 import { ItemActions } from "~/modules/ai-task/components/ai-item-actions"
 
@@ -15,6 +16,7 @@ interface ShortcutItemProps {
 
 export const ShortcutItem = ({ shortcut, onDelete, onToggle, onEdit }: ShortcutItemProps) => {
   const { t } = useTranslation("ai")
+  const displayName = getAIShortcutDisplayName(shortcut, t)
   const isProtected =
     shortcut.defaultPrompt || shortcut.id === DEFAULT_SUMMARIZE_TIMELINE_SHORTCUT_ID
   const actions: ActionButton[] = [
@@ -39,7 +41,7 @@ export const ShortcutItem = ({ shortcut, onDelete, onToggle, onEdit }: ShortcutI
         <div className="flex-1 space-y-2">
           <div className="flex items-center gap-2">
             <i className={shortcut.icon || "i-mgc-hotkey-cute-re"} />
-            <h4 className="text-sm font-medium text-text">{shortcut.name}</h4>
+            <h4 className="text-sm font-medium text-text">{displayName}</h4>
             {shortcut.hotkey && (
               <KbdCombined kbdProps={{ wrapButton: false }} joint={false}>
                 {shortcut.hotkey}

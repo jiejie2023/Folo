@@ -1,5 +1,5 @@
 import { isMobile } from "@follow/components/hooks/useMobile.js"
-import { FeedViewType, getView, UserRole } from "@follow/constants"
+import { FeedViewType, getView, isFreeRole } from "@follow/constants"
 import { IN_ELECTRON } from "@follow/shared/constants"
 import { useIsEntryStarred } from "@follow/store/collection/hooks"
 import { isOnboardingEntryUrl } from "@follow/store/constants/onboarding"
@@ -21,6 +21,7 @@ import {
   useEntryIsInReadability,
 } from "~/atoms/readability"
 import { useIntegrationSettingValue } from "~/atoms/settings/integration"
+import { useIsLocalAITranslationAccessEnabled } from "~/atoms/settings/local-ai-paid-access"
 import { useShowSourceContent } from "~/atoms/source-content"
 import { ipcServices } from "~/lib/client"
 import { COMMAND_ID } from "~/modules/command/commands/id"
@@ -217,23 +218,6 @@ const entrySelector = (state: EntryModel) => {
     hasBitTorrent: attachments.some((a) => a.mime_type === "application/x-bittorrent"),
   }
 }
-export const HIDE_ACTIONS_IN_ENTRY_CONTEXT_MENU: FollowCommandId[] = [
-  COMMAND_ID.entry.viewSourceContent,
-  COMMAND_ID.entry.copyTitle,
-  COMMAND_ID.entry.copyLink,
-  COMMAND_ID.entry.exportAsPDF,
-  COMMAND_ID.entry.imageGallery,
-  COMMAND_ID.entry.toggleAITranslation,
-  COMMAND_ID.entry.share,
-
-  COMMAND_ID.settings.customizeToolbar,
-  COMMAND_ID.entry.readability,
-  COMMAND_ID.entry.exportAsPDF,
-]
-
-export const HIDE_ACTIONS_IN_ENTRY_TOOLBAR_ACTIONS: FollowCommandId[] = [
-  ...HIDE_ACTIONS_IN_ENTRY_CONTEXT_MENU,
-]
 export const useEntryActions = ({ entryId, view }: { entryId: string; view: FeedViewType }) => {
   const entry = useEntry(entryId, entrySelector)
   const { isCollection, entryId: routeEntryId } = useRouteParams()
@@ -259,6 +243,7 @@ export const useEntryActions = ({ entryId, view }: { entryId: string; view: Feed
   const hasEntry = !!entry
 
   const userRole = useUserRole()
+  const isLocalAITranslationAccessEnabled = useIsLocalAITranslationAccessEnabled()
   const integrationSettings = useIntegrationSettingValue()
 
   const shortcuts = useCommandShortcuts()
@@ -377,7 +362,7 @@ export const useEntryActions = ({ entryId, view }: { entryId: string; view: Feed
             view,
           ),
         active: isShowAITranslationOnce,
-        disabled: userRole === UserRole.Free || userRole === UserRole.Trial,
+        disabled: isFreeRole(userRole) && !isLocalAITranslationAccessEnabled,
         entryId,
       }),
       new EntryActionMenuItem({
@@ -486,6 +471,7 @@ export const useEntryActions = ({ entryId, view }: { entryId: string; view: Feed
     isCurrentVisitEntry,
     isShowSourceContent,
     userRole,
+    isLocalAITranslationAccessEnabled,
     isShowAITranslationAuto,
     isShowAITranslationOnce,
     isCollection,
@@ -558,3 +544,8 @@ export const useSortedEntryActions = ({
     moreAction,
   }
 }
+
+export {
+  HIDE_ACTIONS_IN_ENTRY_CONTEXT_MENU,
+  HIDE_ACTIONS_IN_ENTRY_TOOLBAR_ACTIONS,
+} from "./entry-action-visibility"

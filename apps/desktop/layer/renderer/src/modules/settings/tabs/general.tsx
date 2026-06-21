@@ -22,6 +22,7 @@ import {
   useGeneralSettingSelector,
   useGeneralSettingValue,
 } from "~/atoms/settings/general"
+import { useIsLocalAITranslationAccessEnabled } from "~/atoms/settings/local-ai-paid-access"
 import { useDialog } from "~/components/ui/modal/stacked/hooks"
 import { useProxyValue, useSetProxy } from "~/hooks/biz/useProxySetting"
 import { useMinimizeToTrayValue, useSetMinimizeToTray } from "~/hooks/biz/useTraySetting"
@@ -71,6 +72,7 @@ export const SettingGeneral = () => {
 
   const { ask } = useDialog()
   const reRenderKey = useGeneralSettingKey("enhancedSettings")
+  const isLocalAITranslationAccessEnabled = useIsLocalAITranslationAccessEnabled()
 
   return (
     <div className="mt-4">
@@ -103,6 +105,7 @@ export const SettingGeneral = () => {
           defineSettingItem("translation", {
             label: t("general.action.translation.label"),
             description: t("general.action.translation.description"),
+            bypassPaidRoleLock: isLocalAITranslationAccessEnabled,
           }),
           TranslationModeSelector,
           ActionLanguageSelector,
@@ -302,7 +305,9 @@ const TranslationModeSelector = () => {
   const translationMode = useGeneralSettingKey("translationMode")
   const role = useUserRole()
   const isPaymentEnabled = useIsPaymentEnabled()
-  const disabledForRole = role === UserRole.Free && isPaymentEnabled
+  const isLocalAITranslationAccessEnabled = useIsLocalAITranslationAccessEnabled()
+  const disabledForRole =
+    role === UserRole.Free && isPaymentEnabled && !isLocalAITranslationAccessEnabled
 
   return (
     <>

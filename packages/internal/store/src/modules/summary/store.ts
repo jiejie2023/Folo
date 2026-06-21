@@ -3,10 +3,11 @@ import { summaryService } from "@follow/database/services/summary"
 import type { SupportedActionLanguage } from "@follow/shared"
 import { toApiSupportedActionLanguage } from "@follow/shared"
 
-import { api } from "../../context"
+import { api, localAI } from "../../context"
 import type { Hydratable, Resetable } from "../../lib/base"
 import { createImmerSetter, createTransaction, createZustandStore } from "../../lib/helper"
 import { getEntry } from "../entry/getter"
+import type { EntryModel } from "../entry/types"
 import { SummaryGeneratingStatus } from "./enum"
 import type { StatusID } from "./utils"
 import { getGenerateSummaryStatusId } from "./utils"
@@ -169,16 +170,13 @@ class SummarySyncService {
       state.generatingStatus[statusID] = SummaryGeneratingStatus.Pending
     })
 
-    // Use Our AI to generate summary
-    const pendingPromise = api()
-      .ai.summary({
-        id: entryId,
-        language: toApiSupportedActionLanguage(actionLanguage),
-        target,
-      })
-      .then((summary) => {
-        const generatedSummary = summary.data?.trim() ? summary.data : null
-
+    const pendingPromise = requestSummary({
+      actionLanguage,
+      entry,
+      entryId,
+      target,
+    })
+      .then((generatedSummary) => {
         if (!generatedSummary) {
           immerSet((state) => {
             state.generatingStatus[statusID] = SummaryGeneratingStatus.Success
@@ -238,3 +236,48 @@ class SummarySyncService {
 }
 
 export const summarySyncService = new SummarySyncService()
+
+const requestSummary = async ({
+  actionLanguage,
+  entry,
+  entryId,
+  target,
+}: {
+  actionLanguage: SupportedActionLanguage
+  entry: EntryModel
+  entryId: string
+  target: "content" | "readabilityContent"
+}): Promise<string | null> => {
+  const localAIBridge = localAI()
+  if (localAIBridge?.isFeatureEnabled("summary")) {
+    const content = getSummarySourceContent(entry, target)
+    if (!content.trim()) return null
+
+    const result = await localAIBridge.summarizeEntry({
+      content,
+      entryId,
+      language: actionLanguage,
+      target,
+      title: entry.title ?? "",
+    })
+    return result?.summary.trim() ? result.summary : null
+  }
+
+  const summary = await api().ai.summary({
+    id: entryId,
+    language: toApiSupportedActionLanguage(actionLanguage),
+    target,
+  })
+  return summary.data?.trim() ? summary.data : null
+}
+
+const getSummarySourceContent = (
+  entry: EntryModel,
+  target: "content" | "readabilityContent",
+): string => {
+  if (target === "readabilityContent") {
+    return entry.readabilityContent || entry.content || entry.description || ""
+  }
+
+  return entry.content || entry.description || ""
+}

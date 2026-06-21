@@ -11,6 +11,7 @@ import { useUserRole } from "@follow/store/user/hooks"
 import { tracker } from "@follow/tracker"
 import { detectIsEditableElement, nextFrame } from "@follow/utils"
 import type { ConfigResponse } from "@follow-app/client-sdk"
+import { useAtomValue } from "jotai"
 import type { EditorState } from "lexical"
 import { createEditor } from "lexical"
 import { nanoid } from "nanoid"
@@ -24,6 +25,10 @@ import { ErrorBoundary } from "~/components/common/ErrorBoundary"
 import { ROUTE_FEED_IN_FOLDER } from "~/constants"
 import { getRouteParams } from "~/hooks/biz/useRouteParams"
 import { useRequireLogin } from "~/hooks/common/useRequireLogin"
+import {
+  ensureTimelineEntriesContextBlock,
+  hasTimelineEntriesContextBlock,
+} from "~/modules/ai-chat/hooks/timeline-summary-context"
 import { useAutoScroll } from "~/modules/ai-chat/hooks/useAutoScroll"
 import { useLoadMessages } from "~/modules/ai-chat/hooks/useLoadMessages"
 import { useMainEntryId } from "~/modules/ai-chat/hooks/useMainEntryId"
@@ -36,6 +41,8 @@ import {
   useHasMessages,
   useMessages,
 } from "~/modules/ai-chat/store/hooks"
+import { currentTimelineEntryIdsAtom } from "~/modules/entry-column/atoms/current-timeline-entries"
+import { getLocalAIProfileId } from "~/modules/local-ai/hooks"
 
 import { LexicalAIEditorNodes } from "../../editor"
 import { useAIConfiguration } from "../../hooks/useAIConfiguration"
@@ -47,7 +54,13 @@ import {
   extractShortcutIdFromMessageParts,
   extractShortcutIdFromSerializedState,
   prefixMessageIdWithShortcut,
+  refreshShortcutTextInMessageParts,
 } from "../../utils/shortcut"
+import {
+  canBypassLoginForShortcut,
+  getRequestOptionsForShortcut,
+  isTimelineSummaryShortcutId,
+} from "../../utils/timeline-summary"
 import { GlobalFileDropZone } from "../file/GlobalFileDropZone"
 import { AIErrorFallback } from "./AIErrorFallback"
 import { ChatBottomPanel } from "./ChatBottomPanel"
@@ -117,6 +130,7 @@ const ChatInterfaceContent = ({ centerInputOnEmpty, visualOffsetY }: ChatInterfa
   )
 
   const blockActions = useBlockActions()
+  const currentTimelineEntryIds = useAtomValue(currentTimelineEntryIdsAtom)
 
   const staticEditor = useMemo(() => {
     return createEditor({
@@ -125,9 +139,6 @@ const ChatInterfaceContent = ({ centerInputOnEmpty, visualOffsetY }: ChatInterfa
   }, [])
 
   const handleSendMessage = useEventCallback((message: string | EditorState) => {
-    if (!ensureLogin()) {
-      return
-    }
     resetScrollState()
 
     const blocks = [] as AIChatContextBlock[]
@@ -187,6 +198,25 @@ const ChatInterfaceContent = ({ centerInputOnEmpty, visualOffsetY }: ChatInterfa
       })
     }
 
+    if (isTimelineSummaryShortcutId(shortcutIdFromMessage)) {
+      const blockPart = parts.find((part) => part.type === "data-block")
+      if (blockPart?.type === "data-block") {
+        blockPart.data = ensureTimelineEntriesContextBlock(blockPart.data, currentTimelineEntryIds)
+        if (!hasTimelineEntriesContextBlock(blockPart.data)) {
+          return
+        }
+      }
+    }
+
+    const localTimelineSummaryProfileId = getLocalAIProfileId("timelineSummary")
+    const canBypassLogin = canBypassLoginForShortcut({
+      localTimelineSummaryProfileId,
+      shortcutId: shortcutIdFromMessage,
+    })
+    if (!canBypassLogin && !ensureLogin()) {
+      return
+    }
+
     captureContentHeightBeforeSend()
     const messageId = prefixMessageIdWithShortcut(nanoid(), shortcutIdFromMessage)
     const sendMessage: SendingUIMessage = {
@@ -194,7 +224,7 @@ const ChatInterfaceContent = ({ centerInputOnEmpty, visualOffsetY }: ChatInterfa
       role: "user",
       id: messageId,
     }
-    chatActions.sendMessage(sendMessage)
+    chatActions.sendMessage(sendMessage, getRequestOptionsForShortcut(shortcutIdFromMessage))
     tracker.aiChatMessageSent()
 
     // Clear draft message after sending
@@ -207,14 +237,9 @@ const ChatInterfaceContent = ({ centerInputOnEmpty, visualOffsetY }: ChatInterfa
   })
 
   const handleRetryLastMessage = useEventCallback(() => {
-    if (!ensureLogin()) {
-      return
-    }
     if (!lastUserMessage) {
       return
     }
-
-    resetScrollState()
 
     const clonedMessage = structuredClone(lastUserMessage)
     const { createdAt: _createdAt, id: _originalId, ...rest } = clonedMessage
@@ -223,12 +248,43 @@ const ChatInterfaceContent = ({ centerInputOnEmpty, visualOffsetY }: ChatInterfa
       id: nanoid(),
     }
     const retryShortcutId = extractShortcutIdFromMessageParts(retryMessage.parts)
+    retryMessage.parts = refreshShortcutTextInMessageParts(retryMessage.parts)
+    const localTimelineSummaryProfileId = getLocalAIProfileId("timelineSummary")
+    const canBypassLogin = canBypassLoginForShortcut({
+      localTimelineSummaryProfileId,
+      shortcutId: retryShortcutId,
+    })
+    if (!canBypassLogin && !ensureLogin()) {
+      return
+    }
+
+    resetScrollState()
+
+    if (isTimelineSummaryShortcutId(retryShortcutId)) {
+      const blockPart = retryMessage.parts.find((part) => part.type === "data-block")
+      if (blockPart?.type === "data-block") {
+        blockPart.data = ensureTimelineEntriesContextBlock(blockPart.data, currentTimelineEntryIds)
+        if (!hasTimelineEntriesContextBlock(blockPart.data)) {
+          return
+        }
+      } else {
+        const data = ensureTimelineEntriesContextBlock([], currentTimelineEntryIds)
+        if (!hasTimelineEntriesContextBlock(data)) {
+          return
+        }
+        retryMessage.parts.unshift({
+          type: "data-block",
+          data,
+        })
+      }
+    }
+
     retryMessage.id = prefixMessageIdWithShortcut(retryMessage.id, retryShortcutId)
 
     captureContentHeightBeforeSend()
 
     chatActions.popMessage()
-    void chatActions.sendMessage(retryMessage)
+    void chatActions.sendMessage(retryMessage, getRequestOptionsForShortcut(retryShortcutId))
     tracker.aiChatMessageSent()
 
     nextFrame(() => {

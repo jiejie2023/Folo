@@ -1,6 +1,7 @@
 import { initializeDayjs } from "@follow/components/dayjs"
 import { registerGlobalContext } from "@follow/shared/bridge"
 import { DEV, ELECTRON_BUILD, IN_ELECTRON } from "@follow/shared/constants"
+import { localAIContext } from "@follow/store/context"
 import { hydrateDatabaseToStore } from "@follow/store/hydrate"
 import { whoami } from "@follow/store/user/getters"
 import { userSyncService } from "@follow/store/user/store"
@@ -10,6 +11,7 @@ import { enableMapSet } from "immer"
 
 import { initI18n } from "~/i18n"
 import { hydrateSessionsFromLocalDb } from "~/modules/ai-chat-session"
+import { createDesktopLocalAIBridge } from "~/modules/local-ai/bridge"
 import { settingSyncQueue } from "~/modules/settings/helper/sync-queue"
 import { ElectronCloseEvent, ElectronShowEvent } from "~/providers/invalidate-query-provider"
 
@@ -78,7 +80,10 @@ export const initializeApp = async () => {
   // Enable Map/Set in immer
   enableMapSet()
 
-  apm("initializeSettings", initializeSettings)
+  await apm("initializeSettings", initializeSettings)
+  if (IN_ELECTRON) {
+    localAIContext.provide(createDesktopLocalAIBridge())
+  }
 
   await apm("i18n", initI18n)
   await apm("initAnalytics", initAnalytics)

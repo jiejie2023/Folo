@@ -36,6 +36,7 @@ import { useModalStack } from "../../components/ui/modal/stacked/hooks"
 import { ListCreationModalContent } from "../settings/tabs/lists/modals"
 import { CategoryRemoveDialogContent } from "./CategoryRemoveDialogContent"
 import { CategoryUnsubscribeDialogContent } from "./CategoryUnsubscribeDialogContent"
+import { getFeedCategoryNavigationOptions, getFeedCategoryOpenState } from "./FeedCategory.utils"
 import { RenameCategoryForm } from "./RenameCategoryForm"
 import { SortedFeedItems } from "./SortedFeedItems"
 import { feedColumnStyles } from "./styles"
@@ -46,12 +47,15 @@ interface FeedCategoryProps {
   data: FeedId[]
   view: FeedViewType
   categoryOpenStateData: Record<string, boolean>
+  forceOpen?: boolean
+  disableAutoHideUnread?: boolean
 }
 
 function FeedCategoryImpl({
   data: ids,
   view: viewOnRoute,
   categoryOpenStateData,
+  forceOpen,
 }: FeedCategoryProps) {
   const { t } = useTranslation()
 
@@ -69,12 +73,13 @@ function FeedCategoryImpl({
   const isCategory = sortByUnreadFeedList.length > 1 || !!subscription?.category
 
   const open = useMemo(() => {
-    if (!isCategory) return true
-    if (folderName && typeof categoryOpenStateData[folderName] === "boolean") {
-      return categoryOpenStateData[folderName]
-    }
-    return false
+    return getFeedCategoryOpenState({
+      categoryOpenStateData,
+      folderName,
+      isCategory,
+    })
   }, [categoryOpenStateData, folderName, isCategory])
+  const shouldRenderOpen = forceOpen || open
 
   const setOpen = useCallback(
     (next: boolean) => {
@@ -88,6 +93,7 @@ function FeedCategoryImpl({
   const shouldOpen = useRouteParamsSelector(
     (s) => typeof s.feedId === "string" && ids.includes(s.feedId),
   )
+  const currentTimelineId = useRouteParamsSelector((s) => s.timelineId)
 
   const scroller = useScrollViewElement()
   const scrollerRef = useRefValue(scroller)
@@ -138,11 +144,13 @@ function FeedCategoryImpl({
 
   const setCategoryActive = () => {
     if (view !== undefined) {
-      navigate({
-        entryId: null,
-        folderName,
-        view: viewOnRoute,
-      })
+      navigate(
+        getFeedCategoryNavigationOptions({
+          folderName,
+          timelineId: currentTimelineId,
+          view: viewOnRoute,
+        }),
+      )
     }
   }
 
@@ -245,17 +253,14 @@ function FeedCategoryImpl({
                     click() {
                       return changeCategoryView(v.view)
                     },
-                    requiresLogin: true,
                   }),
               ),
-            requiresLogin: true,
           }),
           new MenuItemText({
             label: t("sidebar.feed_column.context_menu.rename_category"),
             click: () => {
               setIsCategoryEditing(true)
             },
-            requiresLogin: true,
           }),
           new MenuItemText({
             label: t("sidebar.feed_column.context_menu.ungroup_category"),
@@ -268,7 +273,6 @@ function FeedCategoryImpl({
                 content: () => <CategoryRemoveDialogContent category={folderName!} view={view} />,
               })
             },
-            requiresLogin: true,
           }),
           new MenuItemText({
             label: t("sidebar.feed_column.context_menu.unsubscribe_category"),
@@ -283,7 +287,6 @@ function FeedCategoryImpl({
                 ),
               })
             },
-            requiresLogin: true,
           }),
         ],
         e,
@@ -321,7 +324,7 @@ function FeedCategoryImpl({
               data-type="collapse"
               type="button"
               onClick={handleCollapseButtonClick}
-              data-state={open ? "open" : "close"}
+              data-state={shouldRenderOpen ? "open" : "close"}
               className={cn(
                 "flex h-8 items-center [&_.i-mgc-right-cute-fi]:data-[state=open]:rotate-90",
               )}
@@ -360,7 +363,7 @@ function FeedCategoryImpl({
         </div>
       )}
       <AnimatePresence initial={false}>
-        {open && (
+        {shouldRenderOpen && (
           <m.div
             ref={itemsRef}
             className="space-y-px"
@@ -401,7 +404,7 @@ export const FeedCategoryAutoHideUnread = memo(function FeedCategoryAutoHideUnre
   props: FeedCategoryProps,
 ) {
   const hideAllReadSubscriptions = useHideAllReadSubscriptions()
-  if (hideAllReadSubscriptions) {
+  if (hideAllReadSubscriptions && !props.disableAutoHideUnread) {
     return <FilterReadFeedCategory {...props} />
   }
   return <FeedCategoryImpl {...props} />

@@ -3,11 +3,14 @@ import type { FC } from "react"
 import { useTranslation } from "react-i18next"
 
 import { getShortcutEffectivePrompt } from "~/atoms/settings/ai"
+import { getActionLanguage } from "~/atoms/settings/general"
 import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "~/components/ui/dropdown-menu/dropdown-menu"
+import { appendAIOutputLanguageInstruction } from "~/modules/ai-chat/utils/output-language"
+import { getAIShortcutDisplayName } from "~/modules/ai-chat/utils/shortcut-display"
 import { useSettingModal } from "~/modules/settings/modal/use-setting-modal-hack"
 
 interface ShortcutsMenuContentProps {
@@ -37,10 +40,17 @@ export const ShortcutsMenuContent: FC<ShortcutsMenuContentProps> = ({
         enabledShortcuts.map((shortcut) => (
           <DropdownMenuItem
             key={shortcut.id}
-            onClick={() => onSendShortcut?.(getShortcutEffectivePrompt(shortcut))}
+            onClick={() =>
+              onSendShortcut?.(
+                appendAIOutputLanguageInstruction(
+                  getShortcutEffectivePrompt(shortcut),
+                  getActionLanguage(),
+                ),
+              )
+            }
           >
             <i className="i-mgc-magic-2-cute-re mr-1.5 size-3.5" />
-            <span className="truncate">{shortcut.name}</span>
+            <span className="truncate">{getAIShortcutDisplayName(shortcut, t)}</span>
           </DropdownMenuItem>
         ))
       )}

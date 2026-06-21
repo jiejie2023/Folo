@@ -48,10 +48,13 @@ export const useDisplayBlocks = (blocks: AIChatContextBlock[]): DisplayBlockItem
         ...(unreadOnlyBlock && { unreadOnlyBlock }),
       })
 
-      // Add other blocks (excluding mainView, mainFeed, and unreadOnly)
+      // Add other blocks (excluding context blocks merged above and hidden timeline entry ids)
       const otherBlocks = blocks.filter(
         (block) =>
-          block.type !== "mainView" && block.type !== "mainFeed" && block.type !== "unreadOnly",
+          block.type !== "mainView" &&
+          block.type !== "mainFeed" &&
+          block.type !== "unreadOnly" &&
+          block.type !== "timelineEntries",
       )
       otherBlocks.forEach((block) => {
         items.push({ kind: "single", block })
@@ -61,6 +64,8 @@ export const useDisplayBlocks = (blocks: AIChatContextBlock[]): DisplayBlockItem
     }
 
     // If none of the special blocks exist, show all blocks as single blocks
-    return blocks.map((block) => ({ kind: "single" as const, block }))
+    return blocks
+      .filter((block) => block.type !== "timelineEntries")
+      .map((block) => ({ kind: "single" as const, block }))
   }, [blocks])
 }

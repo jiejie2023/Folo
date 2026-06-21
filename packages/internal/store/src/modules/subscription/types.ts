@@ -1,5 +1,9 @@
 import type { FeedViewType } from "@follow/constants"
 import type { SubscriptionSchema } from "@follow/database/schemas/types"
+import type { ParsedEntry } from "@follow-app/client-sdk"
+
+import type { FeedModel } from "../feed/types"
+import type { SubscriptionSource } from "./source"
 
 type Nullable<T> = T | null | undefined
 
@@ -14,4 +18,12 @@ export interface SubscriptionForm {
   listId: string | undefined
 }
 
-export type SubscriptionModel = Omit<SubscriptionSchema, "id">
+export type SubscriptionModel = Omit<SubscriptionSchema, "id"> & {
+  source?: SubscriptionSource
+}
+
+export interface LocalSubscriptionInput {
+  feed: FeedModel
+  subscription: SubscriptionForm
+  entries?: ParsedEntry[]
+}

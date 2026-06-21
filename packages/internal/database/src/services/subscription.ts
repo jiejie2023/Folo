@@ -26,6 +26,8 @@ class SubscriptionServiceStatic implements Resetable {
           createdAt: sql`excluded.created_at`,
           feedId: sql`excluded.feed_id`,
           isPrivate: sql`excluded.is_private`,
+          source: sql`excluded.source`,
+          synced: sql`excluded.synced`,
           title: sql`excluded.title`,
           userId: sql`excluded.user_id`,
           view: sql`excluded.view`,
@@ -57,6 +59,21 @@ class SubscriptionServiceStatic implements Resetable {
     if (notExistsIds.length === 0) return
 
     this.delete(notExistsIds.map((s) => s.id))
+  }
+
+  async resetBySource(source: "cloud" | "local", view?: FeedViewType) {
+    const results = await db.query.subscriptionsTable.findMany({
+      where: and(
+        eq(subscriptionsTable.source, source),
+        typeof view === "number" ? eq(subscriptionsTable.view, view) : undefined,
+      ),
+      columns: {
+        id: true,
+      },
+    })
+    if (results.length === 0) return
+
+    await this.delete(results.map((item) => item.id))
   }
 
   async delete(id: string | string[]) {

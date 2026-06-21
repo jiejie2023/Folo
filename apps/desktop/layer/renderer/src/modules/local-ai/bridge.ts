@@ -1,0 +1,640 @@
+import type { LocalAIFeature } from "@follow/shared/settings/interface"
+import type {
+  LocalAIBridge,
+  LocalAIChatCompletionInput,
+  LocalAIChatCompletionResult,
+  LocalAIProfile,
+  LocalAIProfileInput,
+  LocalAIStreamTextResult,
+  LocalAISummaryResult,
+  LocalAITaskResult,
+  LocalAIToolCallResult,
+  LocalAITranslateTextInput,
+  LocalAITranslationResult,
+  LocalAITTSResult,
+  LocalAIUsage,
+} from "@follow/store/local-ai/types"
+
+import { getAISettings } from "~/atoms/settings/ai"
+
+import type {
+  DesktopLocalAICompleteTextInput,
+  DesktopLocalAIProfile,
+  DesktopLocalAIProfileInput,
+  DesktopLocalAIStoredProfile,
+  DesktopLocalAITextResult,
+} from "./hooks"
+import {
+  assertLocalAIProfileEnabled,
+  getLocalAIIPC,
+  resolveLocalAIProfileId,
+  resolveLocalAIProfileModel,
+  resolveLocalAITaskModelPurpose,
+} from "./hooks"
+
+export const createDesktopLocalAIBridge = (): LocalAIBridge => ({
+  isFeatureEnabled(feature) {
+    return resolveLocalAIProfileId(getAISettings().localAI, feature) !== null
+  },
+  async listProfiles() {
+    return (await listDesktopProfiles()).map(toSharedProfile)
+  },
+  async saveProfile(input) {
+    const existingProfile = input.id
+      ? (await listDesktopProfiles()).find((profile) => profile.id === input.id)
+      : undefined
+    const storedProfile = await upsertDesktopProfile(toDesktopProfileInput(input, existingProfile))
+    const profile = (await listDesktopProfiles()).find((item) => item.id === storedProfile.id)
+    if (!profile) {
+      throw new Error("Saved local AI profile could not be reloaded")
+    }
+    return toSharedProfile(profile)
+  },
+  async deleteProfile(profileId) {
+    await requireLocalAIIPC().deleteProfile(profileId)
+  },
+  async testProfile(input) {
+    const startedAt = Date.now()
+    try {
+      const profileId = input.profileId ?? input.profile?.id
+      if (!profileId) {
+        return { error: "Save the profile before testing it.", ok: false }
+      }
+
+      const result = await requireLocalAIIPC().testProfile(profileId, input.model)
+      return {
+        latencyMs: Date.now() - startedAt,
+        model: result.model,
+        ok: true,
+      }
+    } catch (error) {
+      return {
+        error: error instanceof Error ? error.message : String(error),
+        latencyMs: Date.now() - startedAt,
+        ok: false,
+      }
+    }
+  },
+  async listModels(input) {
+    const profileId = input?.profileId ?? getAISettings().localAI.defaultProfileId
+    if (!profileId) return []
+    const models = await requireLocalAIIPC().listModels(profileId)
+    return models.map((model) => ({ id: model, name: model }))
+  },
+  async createChatCompletion(input) {
+    const feature = input.feature ?? "chat"
+    const profile = await resolveProfile(input.profileId, feature)
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "chat")
+    const result = await completeText({
+      feature,
+      maxTokens: input.maxTokens,
+      messages: input.messages.map((message) => ({
+        content: stringifyMessageContent(message.content),
+        name: message.name,
+        role: message.role,
+        toolCallId: message.toolCallId,
+      })),
+      model,
+      profileId: profile.id,
+      temperature: input.temperature,
+    })
+    return textResultToCompletion(result, model)
+  },
+  async summarizeEntry(input) {
+    const profile = await resolveProfile(input.profileId, "summary")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "summary")
+    const result = await completeText({
+      feature: "summary",
+      maxTokens: 800,
+      messages: [
+        {
+          content:
+            "Summarize the provided entry clearly and concisely. Return only the summary text.",
+          role: "system",
+        },
+        {
+          content: `Language: ${input.language}\nTitle: ${input.title}\nContent:\n${input.content}`,
+          role: "user",
+        },
+      ],
+      model,
+      profileId: profile.id,
+      temperature: 0.2,
+    })
+
+    const summary = result.text.trim()
+    if (!summary) return null
+    return {
+      entryId: input.entryId,
+      summary,
+      usage: usageFromTextResult(result),
+    } satisfies LocalAISummaryResult
+  },
+  async translateEntries(input) {
+    const profile = await resolveProfile(input.profileId, "translation")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "translation")
+    const result = await completeText({
+      feature: "translation",
+      messages: [
+        {
+          content:
+            "Translate the requested entry fields. Respond with a strict JSON object keyed by entryId. Each value must include title, description, content, and readabilityContent with string or null values. Return translated text only; do not include the original source text. The app handles bilingual display separately.",
+          role: "system",
+        },
+        {
+          content: JSON.stringify({
+            fields: input.fields,
+            items: input.items,
+            language: input.language,
+            mode: input.mode,
+          }),
+          role: "user",
+        },
+      ],
+      model,
+      profileId: profile.id,
+      responseFormat: "json_object",
+      temperature: 0.1,
+    })
+    try {
+      return parseTranslationRecord(result.text)
+    } catch (error) {
+      throw new Error("Local AI translation response was not valid JSON", { cause: error })
+    }
+  },
+  async streamTranslateText(input) {
+    const profile = await resolveProfile(input.profileId, "translation")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "translation")
+    const messages = buildTranslationTextMessages(input)
+
+    if (!window.electron?.ipcRenderer) {
+      const result = await completeText({
+        feature: "translation",
+        messages,
+        model,
+        profileId: profile.id,
+        temperature: 0.1,
+      })
+      if (result.text) {
+        input.onDelta?.(result.text)
+      }
+      return {
+        text: result.text,
+        usage: usageFromTextResult(result),
+      } satisfies LocalAIStreamTextResult
+    }
+
+    return streamText({
+      feature: "translation",
+      forceStreaming: true,
+      messages,
+      model,
+      onDelta: input.onDelta,
+      profileId: profile.id,
+      temperature: 0.1,
+    })
+  },
+  async synthesizeSpeech(input) {
+    const profile = await resolveProfile(input.profileId, "tts")
+    const model = input.model ?? resolveLocalAIProfileModel(profile, "tts")
+    const result = await requireLocalAIIPC().synthesizeSpeech({
+      format: input.format,
+      input: input.text,
+      model,
+      profileId: profile.id,
+      voice: input.voice,
+    })
+    return {
+      audioBase64: numberArrayToBase64(result.audio),
+      mimeType: result.mimeType,
+    } satisfies LocalAITTSResult
+  },
+  async runTask(input) {
+    const profile = await resolveProfile(input.profileId, input.feature)
+    const model =
+      input.model ??
+      resolveLocalAIProfileModel(profile, resolveLocalAITaskModelPurpose(input.feature))
+    const result = await completeText({
+      feature: input.feature,
+      messages: [
+        {
+          content:
+            "Run the requested local AI task. Return the useful result directly unless the prompt asks for another format.",
+          role: "system",
+        },
+        {
+          content: JSON.stringify({ context: input.context ?? {}, prompt: input.prompt }),
+          role: "user",
+        },
+      ],
+      model,
+      profileId: profile.id,
+      temperature: 0.2,
+    })
+    return {
+      output: result.text,
+      usage: usageFromTextResult(result),
+    } satisfies LocalAITaskResult
+  },
+  async listMCPServers() {
+    return getAISettings().mcpServices.map((service) => ({
+      connected: service.isConnected,
+      enabled: service.enabled,
+      id: service.id,
+      lastError: service.lastError,
+      name: service.name,
+      toolCount: service.toolCount,
+    }))
+  },
+  async listTools() {
+    const services = getAISettings().mcpServices.filter(
+      (service) => service.enabled && Boolean(service.url),
+    )
+    const ipc = requireLocalAIIPC()
+    const toolGroups = await Promise.all(
+      services.map(async (service) => {
+        const tools = await ipc.listMCPTools(toDesktopMCPConnection(service))
+        return tools.map((tool) => ({
+          description: tool.description,
+          id: `${service.id}:${tool.name}`,
+          inputSchema: tool.inputSchema,
+          name: tool.name,
+          serverId: service.id,
+        }))
+      }),
+    )
+    return toolGroups.flat()
+  },
+  async callTool(input) {
+    const settings = getAISettings()
+    const serverId = input.serverId ?? input.toolId.split(":", 1)[0]
+    const service = settings.mcpServices.find((item) => item.id === serverId && item.enabled)
+    if (!service) throw new Error("Local MCP service not found or disabled")
+    const prefix = `${service.id}:`
+    const toolName = input.toolId.startsWith(prefix)
+      ? input.toolId.slice(prefix.length)
+      : input.toolId
+    return requireLocalAIIPC().callMCPTool({
+      ...toDesktopMCPConnection(service),
+      arguments: input.arguments ?? {},
+      name: toolName,
+    }) satisfies Promise<LocalAIToolCallResult>
+  },
+})
+
+const toDesktopMCPConnection = (
+  service: ReturnType<typeof getAISettings>["mcpServices"][number],
+) => {
+  if (!service.url) throw new Error(`MCP service ${service.name} has no endpoint URL`)
+  return {
+    headers: service.headers ?? {},
+    transportType: service.transportType,
+    url: service.url,
+  }
+}
+
+const listDesktopProfiles = async (): Promise<DesktopLocalAIProfile[]> =>
+  requireLocalAIIPC().listProfiles()
+
+const upsertDesktopProfile = async (
+  input: DesktopLocalAIProfileInput,
+): Promise<DesktopLocalAIStoredProfile> => requireLocalAIIPC().upsertProfile(input)
+
+const completeText = async (
+  input: DesktopLocalAICompleteTextInput,
+): Promise<DesktopLocalAITextResult> => requireLocalAIIPC().completeText(input)
+
+type LocalAIStreamTextInput = {
+  feature: LocalAIFeature
+  firstDeltaTimeoutMs?: number
+  forceStreaming?: boolean
+  messages: DesktopLocalAICompleteTextInput["messages"]
+  model: string
+  onDelta?: (delta: string) => void
+  profileId: string
+  temperature?: number
+}
+
+type LocalAIChatDeltaPayload = {
+  delta: string
+  streamId: string
+}
+
+type LocalAIChatErrorPayload = {
+  message: string
+  streamId: string
+}
+
+type LocalAIChatFinishPayload = {
+  result?: DesktopLocalAITextResult
+  streamId: string
+}
+
+const streamText = async ({
+  feature,
+  firstDeltaTimeoutMs,
+  forceStreaming,
+  messages,
+  model,
+  onDelta,
+  profileId,
+  temperature,
+}: LocalAIStreamTextInput): Promise<LocalAIStreamTextResult> => {
+  const localAIIPC = requireLocalAIIPC()
+  const ipcRenderer = window.electron?.ipcRenderer
+  if (!ipcRenderer) {
+    throw new Error("Local AI IPC renderer is unavailable")
+  }
+
+  const { streamId } = await localAIIPC.startChatStream({
+    feature,
+    forceStreaming,
+    messages,
+    model,
+    profileId,
+    temperature,
+  })
+
+  return new Promise<LocalAIStreamTextResult>((resolve, reject) => {
+    const cleanups: Array<() => void> = []
+    let firstDeltaTimer: ReturnType<typeof setTimeout> | undefined
+    let text = ""
+    let settled = false
+
+    const clearFirstDeltaTimer = () => {
+      if (!firstDeltaTimer) return
+      clearTimeout(firstDeltaTimer)
+      firstDeltaTimer = undefined
+    }
+
+    const cleanup = () => {
+      clearFirstDeltaTimer()
+      for (const dispose of cleanups.splice(0)) {
+        dispose()
+      }
+    }
+
+    const settle = (handler: () => void) => {
+      if (settled) return
+      settled = true
+      cleanup()
+      handler()
+    }
+
+    if (firstDeltaTimeoutMs && firstDeltaTimeoutMs > 0) {
+      firstDeltaTimer = setTimeout(() => {
+        settle(() => {
+          void Promise.resolve(localAIIPC.stopChatStream?.(streamId)).catch(() => {})
+          reject(new Error("Local AI stream timed out before the first token"))
+        })
+      }, firstDeltaTimeoutMs)
+    }
+
+    cleanups.push(
+      ipcRenderer.on("local-ai:chat-delta", (_event, payload: unknown) => {
+        if (!isDeltaPayload(payload, streamId)) return
+        clearFirstDeltaTimer()
+        text += payload.delta
+        onDelta?.(payload.delta)
+      }),
+      ipcRenderer.on("local-ai:chat-error", (_event, payload: unknown) => {
+        if (!isErrorPayload(payload, streamId)) return
+        settle(() => reject(new Error(payload.message)))
+      }),
+      ipcRenderer.on("local-ai:chat-finish", (_event, payload: unknown) => {
+        if (!isFinishPayload(payload, streamId)) return
+        const { result } = payload
+        settle(() =>
+          resolve({
+            text: result?.text ?? text,
+            usage: result ? usageFromTextResult(result) : undefined,
+          }),
+        )
+      }),
+    )
+  })
+}
+
+const buildTranslationTextMessages = (
+  input: LocalAITranslateTextInput,
+): DesktopLocalAICompleteTextInput["messages"] => [
+  {
+    content: [
+      "You are a precise translation engine for an RSS reader.",
+      "Return only the translated text.",
+      "Do not include explanations, markdown fences, labels, or the original text.",
+      "The app handles bilingual display by placing your translated text under the source; never output the source text yourself.",
+      "Preserve the original HTML or Markdown structure, tags, links, code blocks, and placeholders.",
+      "Keep names, URLs, code, commands, and inline identifiers unchanged unless they have a standard translation.",
+    ].join(" "),
+    role: "system",
+  },
+  {
+    content: [
+      `Target language: ${input.language}`,
+      `Field: ${input.field}`,
+      `Folo display mode, handled outside the model: ${input.mode}`,
+      "Text:",
+      input.content,
+    ].join("\n"),
+    role: "user",
+  },
+]
+
+const isDeltaPayload = (payload: unknown, streamId: string): payload is LocalAIChatDeltaPayload =>
+  isRecord(payload) && payload.streamId === streamId && typeof payload.delta === "string"
+
+const isErrorPayload = (payload: unknown, streamId: string): payload is LocalAIChatErrorPayload =>
+  isRecord(payload) && payload.streamId === streamId && typeof payload.message === "string"
+
+const isFinishPayload = (payload: unknown, streamId: string): payload is LocalAIChatFinishPayload =>
+  isRecord(payload) && payload.streamId === streamId
+
+const resolveProfile = async (
+  profileId: string | null | undefined,
+  feature: LocalAIFeature,
+): Promise<DesktopLocalAIProfile> => {
+  const resolvedProfileId = profileId ?? resolveLocalAIProfileId(getAISettings().localAI, feature)
+  if (!resolvedProfileId) {
+    throw new Error("Local AI profile is not configured for this feature")
+  }
+
+  const profile = (await listDesktopProfiles()).find((item) => item.id === resolvedProfileId)
+  if (!profile) {
+    throw new Error("Local AI profile not found")
+  }
+  assertLocalAIProfileEnabled(profile)
+  return profile
+}
+
+const toSharedProfile = (profile: DesktopLocalAIProfile): LocalAIProfile => ({
+  baseURL: profile.baseURL,
+  createdAt: profile.createdAt,
+  defaultModel: profile.defaultChatModel,
+  enabled: profile.enabled,
+  hasApiKey: typeof profile.maskedApiKey === "string",
+  headers: profile.headers,
+  id: profile.id,
+  name: profile.name,
+  updatedAt: profile.updatedAt,
+})
+
+const toDesktopProfileInput = (
+  input: LocalAIProfileInput,
+  existingProfile?: DesktopLocalAIProfile,
+): DesktopLocalAIProfileInput => {
+  if (!existingProfile) {
+    return {
+      apiKey: input.apiKey,
+      baseURL: input.baseURL,
+      defaultChatModel: input.defaultModel ?? null,
+      defaultSummaryModel: input.defaultModel ?? null,
+      defaultTaskModel: input.defaultModel ?? null,
+      defaultTimelineModel: input.defaultModel ?? null,
+      defaultTranslationModel: input.defaultModel ?? null,
+      defaultTtsModel: input.defaultModel ?? null,
+      enabled: input.enabled,
+      headers: input.headers ?? {},
+      id: input.id,
+      models: input.defaultModel ? [input.defaultModel] : [],
+      name: input.name,
+      providerType: "openai-compatible",
+      supportsJsonMode: true,
+      supportsStreaming: true,
+      supportsTools: false,
+      supportsTts: false,
+    }
+  }
+
+  const models = [...existingProfile.models]
+  if (input.defaultModel && !models.includes(input.defaultModel)) {
+    models.push(input.defaultModel)
+  }
+
+  return {
+    apiKey: input.apiKey,
+    baseURL: input.baseURL,
+    defaultChatModel:
+      input.defaultModel === undefined ? existingProfile.defaultChatModel : input.defaultModel,
+    defaultSummaryModel: existingProfile.defaultSummaryModel,
+    defaultTaskModel: existingProfile.defaultTaskModel,
+    defaultTimelineModel: existingProfile.defaultTimelineModel,
+    defaultTranslationModel: existingProfile.defaultTranslationModel,
+    defaultTtsModel: existingProfile.defaultTtsModel,
+    enabled: input.enabled,
+    headers: input.headers ?? existingProfile.headers,
+    id: existingProfile.id,
+    models,
+    name: input.name,
+    providerType: existingProfile.providerType,
+    supportsJsonMode: existingProfile.supportsJsonMode,
+    supportsStreaming: existingProfile.supportsStreaming,
+    supportsTools: existingProfile.supportsTools,
+    supportsTts: existingProfile.supportsTts,
+  }
+}
+
+const stringifyMessageContent = (
+  content: LocalAIChatCompletionInput["messages"][number]["content"],
+): string => {
+  if (typeof content === "string") return content
+  if (!content) return ""
+  return content
+    .map((part) => (part.type === "text" ? part.text : `[Image: ${part.imageUrl.url}]`))
+    .join("\n")
+}
+
+const textResultToCompletion = (
+  result: DesktopLocalAITextResult,
+  model: string,
+): LocalAIChatCompletionResult => ({
+  content: result.text,
+  model,
+  usage: usageFromTextResult(result),
+})
+
+const usageFromTextResult = (result: DesktopLocalAITextResult): LocalAIUsage | undefined =>
+  result.totalTokens === null
+    ? undefined
+    : {
+        totalTokens: result.totalTokens,
+      }
+
+const parseTranslationRecord = (text: string): Record<string, LocalAITranslationResult | null> => {
+  const parsed: unknown = JSON.parse(extractJsonObjectText(text))
+  if (!isRecord(parsed)) return {}
+
+  const entries: Array<[string, LocalAITranslationResult | null]> = []
+  for (const [entryId, value] of Object.entries(parsed)) {
+    if (value === null) {
+      entries.push([entryId, null])
+      continue
+    }
+    if (isTranslationResult(value)) {
+      entries.push([entryId, { ...value, entryId }])
+    }
+  }
+  return Object.fromEntries(entries)
+}
+
+const extractJsonObjectText = (text: string): string => {
+  const trimmed = text.trim()
+  const fencedJson = extractFencedCodeBlock(trimmed)
+  if (fencedJson) return fencedJson
+
+  const startIndex = trimmed.indexOf("{")
+  const endIndex = trimmed.lastIndexOf("}")
+  if (startIndex !== -1 && endIndex > startIndex) {
+    return trimmed.slice(startIndex, endIndex + 1)
+  }
+
+  return trimmed
+}
+
+const extractFencedCodeBlock = (text: string): string | null => {
+  if (!text.startsWith("```")) return null
+
+  const lines = text.split("\n")
+  if (lines.length < 3) return null
+
+  const firstLine = lines[0]?.trim().toLowerCase()
+  const lastLine = lines.at(-1)?.trim()
+  if (firstLine !== "```" && firstLine !== "```json") return null
+  if (lastLine !== "```") return null
+
+  return lines.slice(1, -1).join("\n").trim()
+}
+
+const isTranslationResult = (value: unknown): value is LocalAITranslationResult => {
+  if (!isRecord(value)) return false
+  return (
+    isNullableString(value.title) &&
+    isNullableString(value.description) &&
+    isNullableString(value.content) &&
+    isNullableString(value.readabilityContent)
+  )
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value)
+
+const isNullableString = (value: unknown): value is string | null =>
+  typeof value === "string" || value === null
+
+const numberArrayToBase64 = (bytes: number[]): string => {
+  const chunkSize = 0x8000
+  const chunks: string[] = []
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    const chunk = bytes.slice(index, index + chunkSize)
+    chunks.push(String.fromCodePoint(...chunk))
+  }
+  return btoa(chunks.join(""))
+}
+
+const requireLocalAIIPC = () => {
+  const localAIIPC = getLocalAIIPC()
+  if (!localAIIPC) {
+    throw new Error("Local AI IPC is unavailable")
+  }
+  return localAIIPC
+}

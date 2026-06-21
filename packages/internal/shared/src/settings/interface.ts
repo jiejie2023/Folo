@@ -196,6 +196,46 @@ export interface AIShortcut {
   displayTargets?: AIShortcutTarget[]
 }
 
+export type AITaskSchedule =
+  | {
+      type: "once"
+      date: string
+    }
+  | {
+      type: "daily"
+      timeOfDay: string
+    }
+  | {
+      type: "weekly"
+      dayOfWeek: number
+      timeOfDay: string
+    }
+  | {
+      type: "monthly"
+      dayOfMonth: number
+      timeOfDay: string
+    }
+
+export interface AITaskOptions {
+  notifyChannels: Array<"email">
+}
+
+export interface LocalAITask {
+  id: string
+  name: string
+  prompt: string
+  isEnabled: boolean
+  schedule: AITaskSchedule
+  createdAt: string
+  updatedAt: string
+  lastRunAt: string | null
+  nextRunAt: string | null
+  runCount: number
+  lastResult: string | null
+  lastError: string | null
+  options: AITaskOptions
+}
+
 export type MCPTransportType = "streamable-http" | "sse"
 
 export interface MCPService {
@@ -214,10 +254,35 @@ export interface MCPService {
   lastUsed: string | null
 }
 
+export type LocalAIFeature =
+  | "chat"
+  | "summary"
+  | "translation"
+  | "timelineSummary"
+  | "timelineRanking"
+  | "onboardingRecommendations"
+  | "tts"
+  | "tasks"
+  | "mcp"
+
+export type LocalAIMode = "cloud" | "local"
+
+export type LocalAIFeatureRouting = Record<LocalAIFeature, LocalAIMode>
+export type LocalAIProfileRouting = Partial<Record<LocalAIFeature, string | null>>
+
+export interface LocalAISettings {
+  enabled: boolean
+  defaultProfileId: string | null
+  featureRouting: LocalAIFeatureRouting
+  featureProfileIds?: LocalAIProfileRouting
+  allowFallbackToCloud: boolean
+}
+
 export interface AISettings {
   personalizePrompt: string
   aiTimelinePrompt: string
   shortcuts: AIShortcut[]
+  aiTasks: LocalAITask[]
 
   // MCP Services (stored locally, actual connections managed via server API)
   mcpEnabled: boolean
@@ -225,6 +290,8 @@ export interface AISettings {
 
   // Features
   autoScrollWhenStreaming: boolean
+
+  localAI: LocalAISettings
 
   byok: UserByokSettings
 }

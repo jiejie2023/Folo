@@ -163,6 +163,7 @@ export const defaultAISettings: AISettings = {
   personalizePrompt: "",
   aiTimelinePrompt: "",
   shortcuts: [],
+  aiTasks: [],
 
   // MCP Services
   mcpEnabled: false,
@@ -170,6 +171,34 @@ export const defaultAISettings: AISettings = {
 
   // Features
   autoScrollWhenStreaming: true,
+
+  localAI: {
+    enabled: false,
+    defaultProfileId: null,
+    featureRouting: {
+      chat: "cloud",
+      summary: "cloud",
+      translation: "cloud",
+      timelineSummary: "cloud",
+      timelineRanking: "cloud",
+      onboardingRecommendations: "cloud",
+      tts: "cloud",
+      tasks: "cloud",
+      mcp: "cloud",
+    },
+    featureProfileIds: {
+      chat: null,
+      summary: null,
+      translation: null,
+      timelineSummary: null,
+      timelineRanking: null,
+      onboardingRecommendations: null,
+      tts: null,
+      tasks: null,
+      mcp: null,
+    },
+    allowFallbackToCloud: false,
+  },
 
   // BYOK (Bring Your Own Key)
   byok: {

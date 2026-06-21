@@ -14,7 +14,7 @@ import { isOnboardingFeedUrl } from "@follow/store/constants/onboarding"
 import { useFeedById } from "@follow/store/feed/hooks"
 import { useInboxById } from "@follow/store/inbox/hooks"
 import { useListById } from "@follow/store/list/hooks"
-import { useSubscriptionByFeedId } from "@follow/store/subscription/hooks"
+import { useIsFeedSynced, useSubscriptionByFeedId } from "@follow/store/subscription/hooks"
 import { useUnreadById, useUnreadByListId } from "@follow/store/unread/hooks"
 import { cn, isKeyForMultiSelectPressed } from "@follow/utils/utils"
 import { createElement, memo, use, useCallback, useState } from "react"
@@ -61,6 +61,15 @@ const shouldShowFeedErrorIndicator = (errorAt?: string | null) => {
   return Date.now() - errorTime > FEED_ERROR_INDICATOR_DELAY_MS
 }
 
+const SyncedBadge = () => {
+  const { t } = useTranslation()
+  return (
+    <span className="ml-1 shrink-0 rounded bg-blue/10 px-1 text-[10px] leading-4 text-blue">
+      {t("subscription_source.synced")}
+    </span>
+  )
+}
+
 const DraggableItemWrapper: Component<
   {
     className?: string
@@ -83,10 +92,12 @@ const DraggableItemWrapper: Component<
 const FeedItemImpl = ({ view, feedId, className, isPreview }: FeedItemProps) => {
   const { t } = useTranslation()
   const subscription = useSubscriptionByFeedId(feedId)
+  const isSynced = useIsFeedSynced(feedId)
   const navigate = useNavigateEntry()
 
   // Use current route view for navigation to stay in current view (e.g., All view)
   const currentRouteView = useRouteParamsSelector((s) => s.view)
+  const currentTimelineId = useRouteParamsSelector((s) => s.timelineId)
   const navigationView = currentRouteView === FeedViewType.All ? currentRouteView : view
   const feed = useFeedById(feedId, (feed) => {
     return {
@@ -123,9 +134,10 @@ const FeedItemImpl = ({ view, feedId, className, isPreview }: FeedItemProps) => 
         feedId,
         entryId: null,
         view: navigationView,
+        timelineId: currentTimelineId,
       })
     },
-    [feedId, navigate, setSelectedFeedIds, navigationView],
+    [currentTimelineId, feedId, navigate, setSelectedFeedIds, navigationView],
   )
 
   const feedUnread = useUnreadById(feedId)
@@ -245,6 +257,7 @@ const FeedItemImpl = ({ view, feedId, className, isPreview }: FeedItemProps) => 
       <div className={cn("flex min-w-0 items-center", showFeedErrorIndicator && "text-red")}>
         <FeedIcon fallback target={feed} size={16} />
         <FeedTitle feed={feed} />
+        {!isOnboardingFeed && isSynced && <SyncedBadge />}
         {showFeedErrorIndicator && (
           <ErrorTooltip errorAt={feed.errorAt} errorMessage={feed.errorMessage}>
             <i className="i-mingcute-close-circle-fill ml-1 shrink-0 text-base" />
@@ -387,7 +400,6 @@ const ListItemImpl: Component<ListItemProps> = ({
         <EllipsisHorizontalTextWithTooltip className="truncate">
           {getPreferredTitle(list)}
         </EllipsisHorizontalTextWithTooltip>
-
         {subscription?.isPrivate && (
           <Tooltip delayDuration={300}>
             <TooltipTrigger>

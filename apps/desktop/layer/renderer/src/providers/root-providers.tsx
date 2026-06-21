@@ -30,6 +30,7 @@ import {
   LazyPWAPrompt,
   LazyReloadPrompt,
 } from "./lazy/index"
+import { LocalAITaskSchedulerProvider } from "./local-ai-task-scheduler-provider"
 import { ServerConfigsProvider } from "./server-configs-provider"
 import { SettingSync } from "./setting-sync"
 import { UserProvider } from "./user-provider"
@@ -51,6 +52,7 @@ export const RootProviders: FC<PropsWithChildren> = ({ children }) => (
 
                   <StableRouterProvider />
                   <SettingSync />
+                  <LocalAITaskSchedulerProvider />
                   <FollowCommandManager />
                   <ReviewPromptProvider />
 

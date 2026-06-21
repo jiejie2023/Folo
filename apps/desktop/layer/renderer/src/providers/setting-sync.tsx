@@ -3,6 +3,7 @@ import { useIsDark } from "@follow/hooks"
 import { getAccentColorValue } from "@follow/shared/settings/constants"
 import type { UISettings } from "@follow/shared/settings/interface"
 import { useUnreadAll } from "@follow/store/unread/hooks"
+import { useIsLoggedIn } from "@follow/store/user/hooks"
 import { hexToHslString } from "@follow/utils"
 import i18next from "i18next"
 import { useEffect, useInsertionEffect, useLayoutEffect, useRef } from "react"
@@ -20,9 +21,10 @@ import { loadLanguageAndApply } from "~/lib/load-language"
 
 const useUpdateDockBadge = (setting: UISettings) => {
   const unreadCount = useUnreadAll()
+  const isLoggedIn = useIsLoggedIn()
 
   useEffect(() => {
-    if (setting.showDockBadge) {
+    if (setting.showDockBadge && isLoggedIn) {
       ipcServices?.dock.pollingUpdateUnreadCount()
     } else {
       ipcServices?.dock.cancelPollingUpdateUnreadCount().then(() => {
@@ -30,11 +32,11 @@ const useUpdateDockBadge = (setting: UISettings) => {
       })
     }
     return
-  }, [setting.showDockBadge])
+  }, [isLoggedIn, setting.showDockBadge])
 
   const prevCount = useRef<null | number>(null)
   useEffect(() => {
-    if (!setting.showDockBadge) {
+    if (!setting.showDockBadge || !isLoggedIn) {
       return
     }
     if (prevCount.current === unreadCount) {
@@ -44,7 +46,7 @@ const useUpdateDockBadge = (setting: UISettings) => {
     ipcServices?.dock.setDockBadge(unreadCount).then(() => {
       prevCount.current = unreadCount
     })
-  }, [unreadCount, setting.showDockBadge])
+  }, [isLoggedIn, unreadCount, setting.showDockBadge])
 }
 const useUISettingSync = () => {
   const setting = useUISettingValue()

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { computeRateLimitMessage } from "./rate-limit"
+import { computeIsRateLimited, computeRateLimitMessage } from "./rate-limit"
 
 vi.mock("~/i18n", () => ({
   getI18n: () => ({
@@ -74,5 +74,27 @@ describe("computeRateLimitMessage", () => {
     })
 
     expect(message).toBe("AI credits depleted · resets at 12 Apr, 20:45")
+  })
+
+  it("does not treat local AI configuration as cloud credits being depleted", () => {
+    const configuration = {
+      freeQuota: {
+        dailyLimit: 0,
+        monthlyLimit: 0,
+        remainingMonthlyRequests: 0,
+        remainingRequests: 0,
+        role: "local",
+        shouldCheckDailyLimit: false,
+      },
+      usage: {
+        total: 0,
+        used: 0,
+        remaining: 0,
+        resetAt: new Date(0),
+      },
+    }
+
+    expect(computeIsRateLimited(undefined, configuration)).toBe(false)
+    expect(computeRateLimitMessage(undefined, configuration)).toBeNull()
   })
 })

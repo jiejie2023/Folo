@@ -17,6 +17,8 @@ import { useDiscoverRSSHubRouteModal } from "~/hooks/biz/useDiscoverRSSHubRoute"
 import { useFollow } from "~/hooks/biz/useFollow"
 import { navigateEntry } from "~/hooks/biz/useNavigateEntry"
 import { oneTimeToken } from "~/lib/auth"
+import { getAuthTokenFromResult } from "~/lib/auth-token"
+import { setAuthSessionToken } from "~/lib/client-session"
 import { queryClient } from "~/lib/query-client"
 import { usePresentUserProfileModal } from "~/modules/profile/hooks"
 import type { SettingModalOptions } from "~/modules/settings/modal/useSettingModal"
@@ -89,7 +91,11 @@ export const ExtensionExposeProvider = () => {
         clearDataIfLoginOtherAccount(newUserId)
       },
       async applyOneTimeToken(token: string) {
-        await oneTimeToken.apply({ token })
+        const result = await oneTimeToken.apply({ token })
+        const authToken = getAuthTokenFromResult(result)
+        if (authToken) {
+          setAuthSessionToken(authToken)
+        }
         handleSessionChanges()
       },
 

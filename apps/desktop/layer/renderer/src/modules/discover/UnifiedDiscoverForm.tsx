@@ -284,9 +284,12 @@ export function UnifiedDiscoverForm() {
   )
 
   function onSubmit(values: SearchFormData) {
-    if (!ensureLogin()) {
+    const inputType = detectInputType(values.keyword)
+
+    if (inputType === "search" && !ensureLogin()) {
       return
     }
+
     atomKey.current = values.keyword + values.target
     mutation.mutate({ keyword: values.keyword, target: values.target })
   }

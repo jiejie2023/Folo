@@ -12,6 +12,7 @@ import { useEventListener } from "usehooks-ts"
 
 import { setMCPEnabled, useMCPEnabled } from "~/atoms/settings/ai"
 import { useDialog, useModalStack } from "~/components/ui/modal/stacked/hooks"
+import { useLocalAIProfileId } from "~/modules/local-ai/hooks"
 import {
   createMCPConnection,
   deleteMCPConnection,
@@ -31,6 +32,7 @@ type OptimisticMCPService = WithOptimistic<MCPService>
 export const MCPServicesSection = () => {
   const { t } = useTranslation("ai")
   const mcpEnabled = useMCPEnabled()
+  const isLocalMCPMode = useLocalAIProfileId("mcp") !== null
   const queryClient = useQueryClient()
   const dialog = useDialog()
 
@@ -236,19 +238,38 @@ export const MCPServicesSection = () => {
   const refreshToolsMutation = useMutation({
     mutationFn: (connectionIds?: string[]) => refreshMCPTools(connectionIds),
     onSuccess: () => {
-      // Invalidate both connections (for updated counts) and tools queries
-      queryClient.invalidateQueries({ queryKey: mcpQueryKeys.connections() })
-      queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all })
-      toast.success("MCP tools refreshed successfully")
+      toast.success(t("integration.mcp.tools_refreshed"))
     },
     onError: (error) => {
-      toast.error("Failed to refresh MCP tools")
+      toast.error(
+        error instanceof Error ? error.message : t("integration.mcp.tools_refresh_failed"),
+      )
       console.error("Failed to refresh MCP tools:", error)
+    },
+    onSettled: async () => {
+      await queryClient.invalidateQueries({ queryKey: mcpQueryKeys.all })
     },
   })
 
   const { present } = useModalStack()
   const handleAddService = () => {
+    if (isLocalMCPMode) {
+      present({
+        title: t("integration.mcp.services.add"),
+        content: ({ dismiss }: { dismiss: () => void }) => (
+          <MCPServiceModalContent
+            service={null}
+            onSave={(service) => {
+              createConnectionMutation.mutate(service)
+              dismiss()
+            }}
+            onCancel={dismiss}
+          />
+        ),
+      })
+      return
+    }
+
     present({
       title: "Add MCP Service",
       content: ({ dismiss }: { dismiss: () => void }) => (
@@ -355,7 +376,13 @@ export const MCPServicesSection = () => {
         <div className="flex items-center justify-between">
           <div className="space-y-1">
             <Label className="text-sm font-medium text-text">{t("integration.mcp.enabled")}</Label>
-            <div className="text-xs text-text-secondary">{t("integration.mcp.description")}</div>
+            <div className="text-xs text-text-secondary">
+              {t(
+                isLocalMCPMode
+                  ? "integration.mcp.local_description"
+                  : "integration.mcp.description",
+              )}
+            </div>
           </div>
           <Switch checked={mcpEnabled} onCheckedChange={setMCPEnabled} />
         </div>
@@ -363,6 +390,11 @@ export const MCPServicesSection = () => {
 
       {mcpEnabled && (
         <>
+          {isLocalMCPMode && (
+            <div className="rounded-lg border border-blue/20 bg-blue/5 px-3 py-2 text-xs text-text-secondary">
+              {t("integration.mcp.local_oauth_note")}
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <Label className="text-sm font-medium text-text">
               {t("integration.mcp.services.title")}

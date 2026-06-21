@@ -4,6 +4,7 @@ export type FeedListProps = {
   view: FeedViewType
   data: Record<string, string[]>
   categoryOpenStateData: Record<string, boolean>
+  forceOpenCategories?: boolean
 }
 export type SortBy = "count" | "alphabetical"
 

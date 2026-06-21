@@ -21,6 +21,7 @@ import { z } from "zod"
 import { useModalStack } from "~/components/ui/modal/stacked/hooks"
 import { useRecaptchaToken } from "~/hooks/common"
 import { loginHandler, signUp, twoFactor } from "~/lib/auth"
+import { getAuthTokenFromResult } from "~/lib/auth-token"
 import { ipcServices } from "~/lib/client"
 import { setAuthSessionToken } from "~/lib/client-session"
 import { handleSessionChanges } from "~/queries/auth"
@@ -31,57 +32,6 @@ const formSchema = z.object({
   email: z.string().email(),
   password: IN_ELECTRON ? z.string().min(8).max(128) : z.string().min(8).max(128).or(z.literal("")),
 })
-
-const getAuthTokenFromResult = (result: unknown) => {
-  if (!result || typeof result !== "object") {
-    return null
-  }
-
-  if ("sessionToken" in result && typeof result.sessionToken === "string") {
-    return result.sessionToken
-  }
-
-  if ("token" in result && typeof result.token === "string") {
-    return result.token
-  }
-
-  if ("session" in result && result.session && typeof result.session === "object") {
-    const { token } = result.session as { token?: unknown }
-    if (typeof token === "string") {
-      return token
-    }
-  }
-
-  if (
-    "data" in result &&
-    result.data &&
-    typeof result.data === "object" &&
-    ("sessionToken" in result.data || "token" in result.data || "session" in result.data)
-  ) {
-    const { sessionToken, token, session } = result.data as {
-      sessionToken?: unknown
-      token?: unknown
-      session?: { token?: unknown } | unknown
-    }
-    if (typeof sessionToken === "string") {
-      return sessionToken
-    }
-    if (typeof token === "string") {
-      return token
-    }
-    if (
-      session &&
-      typeof session === "object" &&
-      "token" in session &&
-      typeof session.token === "string"
-    ) {
-      return session.token
-    }
-    return null
-  }
-
-  return null
-}
 
 type ElectronAuthResult = {
   data?: Record<string, unknown>

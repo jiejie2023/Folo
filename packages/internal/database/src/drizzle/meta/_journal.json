@@ -267,6 +267,20 @@
       "when": 1768727702017,
       "tag": "0037_bored_the_leader",
       "breakpoints": true
+    },
+    {
+      "idx": 38,
+      "version": "6",
+      "when": 1781327562760,
+      "tag": "0038_outstanding_supernaut",
+      "breakpoints": true
+    },
+    {
+      "idx": 39,
+      "version": "6",
+      "when": 1781362357434,
+      "tag": "0039_local_first_subscriptions",
+      "breakpoints": true
     }
   ]
 }

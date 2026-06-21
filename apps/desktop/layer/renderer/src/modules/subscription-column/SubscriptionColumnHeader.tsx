@@ -66,7 +66,6 @@ export const SubscriptionColumnHeader = memo(() => {
         >
           <i className="i-mgc-add-cute-re size-5 text-text-secondary" />
         </ActionButton>
-
         <ProfileButton method="modal" animatedAvatar />
         <LayoutActionButton />
       </div>

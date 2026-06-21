@@ -23,6 +23,7 @@ import { FeedViewType, UserRole } from "@follow/constants"
 import { useFeedByIdOrUrl } from "@follow/store/feed/hooks"
 import type { FeedModel } from "@follow/store/feed/types"
 import { useCategories, useSubscriptionByFeedId } from "@follow/store/subscription/hooks"
+import { inferRecoveredSubscriptionView } from "@follow/store/subscription/recovery-category"
 import { subscriptionSyncService } from "@follow/store/subscription/store"
 import { whoami } from "@follow/store/user/getters"
 import { useIsLoggedIn, useUserRole } from "@follow/store/user/hooks"
@@ -57,6 +58,12 @@ const formSchema = z.object({
   title: z.string().optional(),
 })
 export type FeedFormDataValuesType = z.infer<typeof formSchema>
+
+const getFallbackSubscriptionView = () => {
+  const routeView = getRouteParams().view
+
+  return routeView === FeedViewType.All ? FeedViewType.Articles : routeView
+}
 
 export const PaidBadge = () => {
   const { t } = useTranslation("settings")
@@ -238,11 +245,12 @@ const FeedInnerForm = ({
 }) => {
   const subscription = useSubscriptionByFeedId(id || "") || subscriptionData
   const isSubscribed = !!subscription
+  const inferredView = useMemo(() => inferRecoveredSubscriptionView(feed), [feed])
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
     defaultValues: defaultValues || {
-      view: getRouteParams().view.toString() || FeedViewType.Articles.toString(),
+      view: (inferredView ?? getFallbackSubscriptionView()).toString(),
     },
   })
 
@@ -268,12 +276,14 @@ const FeedInnerForm = ({
     if (
       typeof analytics?.view === "number" &&
       !subscription &&
-      typeof defaultValues?.view !== "number"
+      !defaultValues?.view &&
+      typeof inferredView !== "number"
     ) {
       form.setValue("view", `${analytics.view}`)
     }
-  }, [analytics, defaultValues?.view, form, subscription])
+  }, [analytics, defaultValues?.view, form, inferredView, subscription])
 
+  // Local add is the default in the custom desktop build. Cloud sync remains a separate action.
   const followMutation = useMutation({
     mutationFn: async (values: z.infer<typeof formSchema>) => {
       const userId = whoami()?.id || ""
@@ -292,16 +302,20 @@ const FeedInnerForm = ({
 
       if (isSubscribed) {
         return subscriptionSyncService.edit(body)
-      } else {
-        return subscriptionSyncService.subscribe(body)
       }
+
+      return subscriptionSyncService.subscribeLocal({
+        feed,
+        subscription: body,
+        entries,
+      })
     },
     onSuccess: () => {
       const feedId = feed.id
       if (feedId) {
         feedQuery.byId({ id: feedId }).invalidate()
       }
-      toast(isSubscribed ? t("feed_form.updated") : t("feed_form.followed"), {
+      toast(isSubscribed ? t("feed_form.updated") : "已添加到本地", {
         duration: 1000,
       })
 
@@ -496,13 +510,12 @@ const FeedInnerForm = ({
             </Button>
           )}
           <Button
-            disabled={!isLoggedIn}
             data-testid="feed-form-submit"
             form="feed-form"
             type="submit"
             isLoading={followMutation.isPending}
           >
-            {isSubscribed ? t("feed_form.update") : t("feed_form.follow")}
+            {isSubscribed ? t("feed_form.update") : "添加到本地"}
           </Button>
         </div>
       </RootPortal>

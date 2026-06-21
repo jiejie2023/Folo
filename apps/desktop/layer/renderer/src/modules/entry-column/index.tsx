@@ -8,7 +8,7 @@ import { unreadSyncService } from "@follow/store/unread/store"
 import { useIsLoggedIn } from "@follow/store/user/hooks"
 import { isBizId } from "@follow/utils/utils"
 import type { Range, Virtualizer } from "@tanstack/react-virtual"
-import { atom, useAtomValue } from "jotai"
+import { atom, useAtomValue, useSetAtom } from "jotai"
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
 
@@ -22,6 +22,7 @@ import { useFeedQuery } from "~/queries/feed"
 import { useFeedHeaderTitle } from "~/store/feed/hooks"
 
 import { aiTimelineEnabledAtom } from "./atoms/ai-timeline"
+import { currentTimelineEntryIdsAtom } from "./atoms/current-timeline-entries"
 import { AITimelineLoadingOverlay } from "./components/ai-timeline-loading/AITimelineLoadingOverlay"
 import { EntryColumnWrapper } from "./components/entry-column-wrapper/EntryColumnWrapper"
 import { FooterMarkItem } from "./components/FooterMarkItem"
@@ -92,6 +93,13 @@ function EntryColumnContent() {
   }, [actions, scrollTimelineToTop])
 
   const { entriesIds, groupedCounts } = state
+  const setCurrentTimelineEntryIds = useSetAtom(currentTimelineEntryIdsAtom)
+  useEffect(() => {
+    setCurrentTimelineEntryIds(entriesIds)
+    return () => {
+      setCurrentTimelineEntryIds([])
+    }
+  }, [entriesIds, setCurrentTimelineEntryIds])
   useSnapEntryIdList(entriesIds)
 
   const {

@@ -62,6 +62,10 @@ export function computeIsRateLimited(
   error: Error | string | undefined,
   conf?: AIConfigLike | null,
 ): boolean {
+  if (isLocalAIConfiguration(conf)) {
+    return false
+  }
+
   if (error) {
     const parsed = parseAIError(error)
     if (parsed.isRateLimitError) return true
@@ -82,6 +86,10 @@ export function computeRateLimitMessage(
   configuration?: AIConfigLike | null,
   options?: RateLimitMessageOptions,
 ): string | null {
+  if (isLocalAIConfiguration(configuration)) {
+    return null
+  }
+
   const i18n = getI18n()
   const { t } = i18n
   const hideResetDetails = options?.hideResetDetails ?? false
@@ -162,3 +170,6 @@ export function computeRateLimitMessage(
 
   return null
 }
+
+const isLocalAIConfiguration = (configuration?: AIConfigLike | null): boolean =>
+  configuration?.freeQuota?.role === "local"

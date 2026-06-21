@@ -119,6 +119,7 @@ const config: ForgeConfig = {
       process.platform !== "win32" ? noopAfterCopy : setLanguages([...keepLanguages.values()]),
     ],
     asar: true,
+    derefSymlinks: true,
     ignore: [ignorePattern],
 
     prune: false,

@@ -33,6 +33,7 @@ export class BlockSliceAction {
     mainView: "mainView",
     mainEntry: "mainEntry",
     mainFeed: "mainFeed",
+    timelineEntries: "timelineEntries",
     unreadOnly: "unreadOnly",
   }
   get set() {

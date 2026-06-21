@@ -7,13 +7,16 @@ import {
 import { ScrollArea } from "@follow/components/ui/scroll-area/index.js"
 import { Skeleton } from "@follow/components/ui/skeleton/index.jsx"
 import { FeedViewType } from "@follow/constants"
+import { useFeedStore } from "@follow/store/feed/store"
 import { useInboxList } from "@follow/store/inbox/hooks"
 import { useListById } from "@follow/store/list/hooks"
 import {
   useCategoryOpenStateByView,
   useFeedsGroupedData,
   useSubscriptionListIds,
+  useSyncedFeedsGroupedData,
 } from "@follow/store/subscription/hooks"
+import { useSubscriptionStore } from "@follow/store/subscription/store"
 import { nextFrame } from "@follow/utils/dom"
 import { EventBus } from "@follow/utils/event-bus"
 import { cn, combineCleanupFunctions, isKeyForMultiSelectPressed } from "@follow/utils/utils"
@@ -41,32 +44,65 @@ import { DraggableContext } from "../context"
 import { FeedItem, ListItemAutoHideUnread } from "../FeedItem"
 import { useShouldFreeUpSpace } from "../hook"
 import { SortableFeedList, SortByAlphabeticalInbox, SortByAlphabeticalList } from "../sort-by"
+import {
+  filterGroupedSubscriptionsBySearch,
+  normalizeSubscriptionSearchQuery,
+} from "../subscription-search"
 import { EmptyFeedList } from "./EmptyFeedList"
 import { ListHeader } from "./ListHeader"
 import { StarredItem } from "./StarredItem"
 import type { SubscriptionProps } from "./SubscriptionListGuard"
 
-const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: SubscriptionProps) => {
+const SubscriptionImpl = ({
+  ref,
+  className,
+  view,
+  isSubscriptionLoading,
+  feedSearchQuery = "",
+}: SubscriptionProps) => {
+  const routerParams = useRouteParams()
   const autoGroup = useGeneralSettingKey("autoGroup")
-  const feedsData = useFeedsGroupedData(view, autoGroup)
+  const allFeedsData = useFeedsGroupedData(view, autoGroup)
+  const syncedFeedsData = useSyncedFeedsGroupedData(view, autoGroup)
+  const feedsData = routerParams.isSyncedTimeline ? syncedFeedsData : allFeedsData
+  const normalizedFeedSearchQuery = normalizeSubscriptionSearchQuery(feedSearchQuery)
+  const isSearchingFeeds = normalizedFeedSearchQuery.length > 0
+  const visibleFeedsData = useFeedStore(
+    useCallback(
+      (state) =>
+        filterGroupedSubscriptionsBySearch({
+          grouped: feedsData,
+          feeds: state.feeds,
+          subscriptions: useSubscriptionStore.getState().data,
+          query: normalizedFeedSearchQuery,
+        }),
+      [feedsData, normalizedFeedSearchQuery],
+    ),
+  )
 
-  const listSubIds = useSubscriptionListIds(view)
-  const inboxSubIds = useInboxList(
+  const allListSubIds = useSubscriptionListIds(view)
+  const allInboxSubIds = useInboxList(
     useCallback(
       (inboxes) => (view === FeedViewType.Articles ? inboxes.map((inbox) => inbox.id) : []),
       [view],
     ),
   )
+  const listSubIds = routerParams.isSyncedTimeline ? [] : allListSubIds
+  const inboxSubIds = routerParams.isSyncedTimeline ? [] : allInboxSubIds
+  const visibleListSubIds = isSearchingFeeds ? [] : listSubIds
+  const visibleInboxSubIds = isSearchingFeeds ? [] : inboxSubIds
 
   const categoryOpenStateData = useCategoryOpenStateByView(view)
 
   const hasData =
-    Object.keys(feedsData).length > 0 || listSubIds.length > 0 || inboxSubIds.length > 0
+    Object.keys(visibleFeedsData).length > 0 ||
+    visibleListSubIds.length > 0 ||
+    visibleInboxSubIds.length > 0
 
   const { t } = useTranslation()
 
-  const hasListData = listSubIds.length > 0
-  const hasInboxData = inboxSubIds.length > 0
+  const hasListData = visibleListSubIds.length > 0
+  const hasInboxData = visibleInboxSubIds.length > 0
 
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const selectoRef = useRef<Selecto>(null)
@@ -134,7 +170,6 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
 
   const shouldFreeUpSpace = useShouldFreeUpSpace()
 
-  const routerParams = useRouteParams()
   const { listId, feedId } = routerParams
   const isPreview = useIsPreviewFeed()
   const isFeedPreview = isPreview && !listId
@@ -245,7 +280,7 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
         viewportClassName={cn("!px-1", shouldFreeUpSpace && "!overflow-visible")}
         rootClassName={cn("h-full", shouldFreeUpSpace && "overflow-visible")}
       >
-        <StarredItem view={view} />
+        {!routerParams.isSyncedTimeline && !isSearchingFeeds && <StarredItem view={view} />}
         {(hasListData || (isListPreview && listId)) && (
           <>
             <div className="mt-1 flex h-6 w-full shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-text-secondary transition-colors">
@@ -259,7 +294,7 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
                 isPreview
               />
             )}
-            <SortByAlphabeticalList view={view} data={listSubIds} />
+            <SortByAlphabeticalList view={view} data={visibleListSubIds} />
           </>
         )}
         {hasInboxData && (
@@ -267,21 +302,20 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
             <div className="mt-1 flex h-6 w-full shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-text-secondary transition-colors">
               {t("words.inbox")}
             </div>
-            <SortByAlphabeticalInbox view={view} data={inboxSubIds} />
+            <SortByAlphabeticalInbox view={view} data={visibleInboxSubIds} />
           </>
         )}
-
         {(hasListData || hasInboxData) && (
           <div
             className={cn(
               "mb-1 flex h-6 w-full shrink-0 items-center rounded-md px-2.5 text-xs font-semibold text-text-secondary transition-colors",
-              Object.keys(feedsData).length === 0 ? "mt-0" : "mt-1",
+              Object.keys(visibleFeedsData).length === 0 ? "mt-0" : "mt-1",
             )}
           >
             {t("words.feeds")}
           </div>
         )}
-        {isFeedPreview && feedId && (
+        {isFeedPreview && feedId && !routerParams.isSyncedTimeline && (
           <FeedItem feedId={feedId} view={view} className="pl-2.5 pr-0.5" isPreview />
         )}
         <DraggableContext value={draggableContextValue}>
@@ -289,11 +323,14 @@ const SubscriptionImpl = ({ ref, className, view, isSubscriptionLoading }: Subsc
             {hasData ? (
               <SortableFeedList
                 view={view}
-                data={feedsData}
+                data={visibleFeedsData}
                 categoryOpenStateData={categoryOpenStateData ?? {}}
+                forceOpenCategories={isSearchingFeeds}
               />
-            ) : isSubscriptionLoading ? (
+            ) : isSubscriptionLoading && !isSearchingFeeds ? (
               <SubscriptionListSkeleton />
+            ) : isSearchingFeeds ? (
+              <SubscriptionSearchEmpty />
             ) : (
               <EmptyFeedList />
             )}
@@ -413,13 +450,32 @@ const useRegisterCommand = () => {
   }, [focusableContainerRef, focusActions, getCurrentActiveSubscriptionElement])
 }
 
+const subscriptionListSkeletonKeys = [
+  "subscription-list-skeleton-1",
+  "subscription-list-skeleton-2",
+  "subscription-list-skeleton-3",
+  "subscription-list-skeleton-4",
+  "subscription-list-skeleton-5",
+]
+
 const SubscriptionListSkeleton = () => (
   <div className="px-1">
-    {Array.from({ length: 5 }).map((_, index) => (
-      <div key={index} className="flex h-8 items-center justify-between">
+    {subscriptionListSkeletonKeys.map((key) => (
+      <div key={key} className="flex h-8 items-center justify-between">
         <Skeleton className="h-4 w-28" />
         <Skeleton className="size-4" />
       </div>
     ))}
   </div>
 )
+
+const SubscriptionSearchEmpty = () => {
+  const { t } = useTranslation()
+
+  return (
+    <div className="center flex-col gap-2 px-4 py-8 text-center text-sm text-text-tertiary">
+      <i className="i-mgc-search-cute-re size-5" />
+      <span>{t("search.empty.no_results")}</span>
+    </div>
+  )
+}
