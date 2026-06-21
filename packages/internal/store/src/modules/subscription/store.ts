@@ -23,6 +23,7 @@ import { whoami } from "../user/getters"
 import { getCategoryFeedIds } from "./getter"
 import {
   inferRecoveredSubscriptionCategory,
+  inferRecoveredSubscriptionView,
   RECOVERED_LOCAL_SUBSCRIPTION_CATEGORY,
 } from "./recovery-category"
 import type { SubscriptionSource } from "./source"
@@ -183,7 +184,7 @@ const recoverLocalSubscriptionsFromCachedFeeds = (
     listId: null,
     inboxId: null,
     userId: "local",
-    view: FeedViewType.Articles,
+    view: inferRecoveredSubscriptionView(feed) ?? FeedViewType.Articles,
     isPrivate: false,
     hideFromTimeline: null,
     title: null,
@@ -204,7 +205,6 @@ const reclassifyRecoveredLocalSubscriptions = (
   return subscriptions.flatMap((subscription) => {
     if (
       getSubscriptionSource(subscription) !== "local" ||
-      subscription.category !== RECOVERED_LOCAL_SUBSCRIPTION_CATEGORY ||
       !subscription.feedId
     ) {
       return []
@@ -213,12 +213,23 @@ const reclassifyRecoveredLocalSubscriptions = (
     const feed = feedById.get(subscription.feedId)
     if (!feed) return []
 
-    const category = inferRecoveredSubscriptionCategory(feed)
+    const inferredView = inferRecoveredSubscriptionView(feed)
+    const shouldUpdateView =
+      typeof inferredView === "number" && subscription.view !== inferredView
+    const shouldUpdateRecoveredCategory =
+      subscription.category === RECOVERED_LOCAL_SUBSCRIPTION_CATEGORY
+
+    if (!shouldUpdateView && !shouldUpdateRecoveredCategory) {
+      return []
+    }
 
     return [
       {
         ...subscription,
-        category,
+        ...(shouldUpdateView && { view: inferredView }),
+        ...(shouldUpdateRecoveredCategory && {
+          category: inferRecoveredSubscriptionCategory(feed),
+        }),
       },
     ]
   })

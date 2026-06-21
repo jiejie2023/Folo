@@ -361,6 +361,37 @@ describe("subscription source-aware reset", () => {
     ])
   })
 
+  test("hydrate recovers cached Twitter feeds into the social media view", async () => {
+    const cachedFeed: FeedSchema = {
+      id: "twitter-feed",
+      url: "rsshub://twitter/user/example",
+      title: "Twitter @example",
+    }
+    const cachedEntry: EntrySchema = {
+      id: "twitter-entry",
+      guid: "twitter-entry",
+      insertedAt: new Date("2026-06-15T00:00:00.000Z"),
+      publishedAt: new Date("2026-06-15T00:00:00.000Z"),
+      feedId: "twitter-feed",
+    }
+    feedGetAllMock.mockResolvedValue([cachedFeed])
+    entryGetAllMock.mockResolvedValue([cachedEntry])
+
+    await subscriptionActions.hydrate()
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["twitter-feed"]).toEqual(
+      expect.objectContaining({
+        feedId: "twitter-feed",
+        source: "local",
+        view: FeedViewType.SocialMedia,
+        category: "Social",
+      }),
+    )
+    expect(state.feedIdByView[FeedViewType.SocialMedia]?.has("twitter-feed")).toBe(true)
+    expect(state.feedIdByView[FeedViewType.Articles]?.has("twitter-feed")).toBe(false)
+  })
+
   test("hydrate reclassifies recovered local subscriptions from cached feed metadata", async () => {
     const recoveredLocalSubscription: SubscriptionSchema = {
       ...localSub("openai-feed"),
@@ -423,6 +454,41 @@ describe("subscription source-aware reset", () => {
     expect(subscriptionPatchMock).not.toHaveBeenCalledWith(
       expect.objectContaining({
         id: "feed/cloud-feed",
+      }),
+    )
+  })
+
+  test("hydrate reclassifies local Twitter subscriptions into the social media view", async () => {
+    const localTwitterSubscription: SubscriptionSchema = {
+      ...localSub("twitter-feed"),
+      id: "feed/twitter-feed",
+      category: "90 Inbox",
+      view: FeedViewType.Articles,
+    }
+
+    subscriptionGetAllMock.mockResolvedValue([localTwitterSubscription])
+    feedGetAllMock.mockResolvedValue([
+      {
+        id: "twitter-feed",
+        title: "Twitter @example",
+        url: "rsshub://twitter/user/example",
+      },
+    ])
+
+    await subscriptionActions.hydrate()
+
+    const state = useSubscriptionStore.getState()
+    expect(state.data["twitter-feed"]?.view).toBe(FeedViewType.SocialMedia)
+    expect(state.data["twitter-feed"]?.category).toBe("90 Inbox")
+    expect(state.feedIdByView[FeedViewType.SocialMedia]?.has("twitter-feed")).toBe(true)
+    expect(state.feedIdByView[FeedViewType.Articles]?.has("twitter-feed")).toBe(false)
+    expect(subscriptionPatchMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "feed/twitter-feed",
+        feedId: "twitter-feed",
+        category: "90 Inbox",
+        view: FeedViewType.SocialMedia,
+        source: "local",
       }),
     )
   })

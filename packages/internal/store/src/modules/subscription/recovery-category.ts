@@ -1,6 +1,18 @@
+import { FeedViewType } from "@follow/constants"
 import type { FeedSchema } from "@follow/database/schemas/types"
 
 export const RECOVERED_LOCAL_SUBSCRIPTION_CATEGORY = "Recovered"
+
+const SOCIAL_VIEW_PATTERNS = [
+  /^rsshub:\/\/twitter\//,
+  /^rsshub:\/\/telegram\//,
+  /^rsshub:\/\/mastodon\//,
+  /^rsshub:\/\/bsky\//,
+  /^rsshub:\/\/threads\//,
+  /\btwitter\.com\b/,
+  /\bx\.com\b/,
+  /\bt\.me\b/,
+] as const
 
 const CATEGORY_RULES = [
   {
@@ -79,4 +91,17 @@ export const inferRecoveredSubscriptionCategory = (feed: FeedSchema) => {
   }
 
   return "News"
+}
+
+export const inferRecoveredSubscriptionView = (feed: FeedSchema): FeedViewType | undefined => {
+  const haystack = [feed.url, feed.siteUrl, feed.title, feed.description]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
+    .join(" ")
+    .toLowerCase()
+
+  if (SOCIAL_VIEW_PATTERNS.some((pattern) => pattern.test(haystack))) {
+    return FeedViewType.SocialMedia
+  }
+
+  return undefined
 }

@@ -1,7 +1,11 @@
+import { FeedViewType } from "@follow/constants"
 import type { FeedSchema } from "@follow/database/schemas/types"
 import { describe, expect, test } from "vitest"
 
-import { inferRecoveredSubscriptionCategory } from "./recovery-category"
+import {
+  inferRecoveredSubscriptionCategory,
+  inferRecoveredSubscriptionView,
+} from "./recovery-category"
 
 const feed = (feed: Partial<FeedSchema> & Pick<FeedSchema, "id" | "url">): FeedSchema => feed
 
@@ -82,5 +86,39 @@ describe("inferRecoveredSubscriptionCategory", () => {
     ],
   ])("classifies %s as %s", (input, expected) => {
     expect(inferRecoveredSubscriptionCategory(input)).toBe(expected)
+  })
+})
+
+describe("inferRecoveredSubscriptionView", () => {
+  test.each([
+    feed({
+      id: "twitter",
+      title: "Twitter @example",
+      url: "rsshub://twitter/user/example",
+    }),
+    feed({
+      id: "x",
+      title: "Example on X",
+      url: "https://x.com/example",
+    }),
+    feed({
+      id: "telegram",
+      title: "Pavel Durov - Telegram Channel",
+      url: "rsshub://telegram/channel/durov",
+    }),
+  ])("classifies social feed %s as SocialMedia", (input) => {
+    expect(inferRecoveredSubscriptionView(input)).toBe(FeedViewType.SocialMedia)
+  })
+
+  test("does not classify regular article feeds as SocialMedia", () => {
+    expect(
+      inferRecoveredSubscriptionView(
+        feed({
+          id: "openai",
+          title: "OpenAI News",
+          url: "https://openai.com/news/rss.xml",
+        }),
+      ),
+    ).toBeUndefined()
   })
 })
